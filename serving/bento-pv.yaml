@@ -1,0 +1,25 @@
+# bento-pv.yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: bentoml-pv
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:               # for Minikube only
+    path: /mnt/data/bentoml
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bentoml-pvc
+  namespace: mlops
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

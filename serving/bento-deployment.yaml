@@ -1,0 +1,45 @@
+# bento-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: news-classifier
+  namespace: mlops
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: news-classifier
+  template:
+    metadata:
+      labels:
+        app: news-classifier
+    spec:
+      containers:
+      - name: news-classifier
+        image: news-classifier:latest
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 10000
+        command: ["bentoml", "serve", "/home/bentoml/bento", "--port", "10000", "--host", "0.0.0.0"]
+        volumeMounts:
+        - mountPath: /bentoml
+          name: bentoml-store
+      volumes:
+      - name: bentoml-store
+        persistentVolumeClaim:
+          claimName: bentoml-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: news-classifier
+  namespace: mlops
+spec:
+  type: NodePort
+  selector:
+    app: news-classifier
+  ports:
+  - port: 80
+    targetPort: 10000
+    nodePort: 31000

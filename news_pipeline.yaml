@@ -1,0 +1,356 @@
+# PIPELINE DEFINITION
+# Name: news-classification-full
+# Inputs:
+#    endpoint: str
+#    news_api_key: str
+components:
+  comp-download-model-op:
+    executorLabel: exec-download-model-op
+    inputDefinitions:
+      parameters:
+        endpoint:
+          parameterType: STRING
+  comp-fetch-op:
+    executorLabel: exec-fetch-op
+    inputDefinitions:
+      parameters:
+        endpoint:
+          parameterType: STRING
+        news_api_key:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        raw_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-preprocess-op:
+    executorLabel: exec-preprocess-op
+    inputDefinitions:
+      artifacts:
+        raw_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        endpoint:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        train_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        val_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-train-op:
+    executorLabel: exec-train-op
+    inputDefinitions:
+      artifacts:
+        train_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        val_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        endpoint:
+          parameterType: STRING
+        epochs:
+          defaultValue: 1.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+deploymentSpec:
+  executors:
+    exec-download-model-op:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - download_model_op
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'mlflow==2.13.0'\
+          \ 'bentoml' 'boto3' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef download_model_op(endpoint: str):\n    import os\n    import\
+          \ mlflow\n    import bentoml\n\n    mlflow.set_tracking_uri(\"http://mlflow.mlops.svc.cluster.local:5000\"\
+          )\n    os.environ[\"MLFLOW_S3_ENDPOINT_URL\"] = endpoint\n    os.environ[\"\
+          AWS_ACCESS_KEY_ID\"] = \"minioadmin\"\n    os.environ[\"AWS_SECRET_ACCESS_KEY\"\
+          ] = \"minioadmin123\"\n\n    client = mlflow.MlflowClient()\n    experiment\
+          \ = client.get_experiment_by_name(\"news-classification\")\n    runs = client.search_runs(experiment.experiment_id,\
+          \ order_by=[\"start_time DESC\"])\n    run_id = runs[0].info.run_id\n  \
+          \  model_uri = f\"runs:/{run_id}/model\"\n\n    print(f\"Importing model\
+          \ from {model_uri} into BentoML...\")\n    bentoml.mlflow.import_model(\n\
+          \        name=\"news_classifier\",\n        model_uri=model_uri,\n     \
+          \   signatures={\"predict\": {\"batchable\": False}},\n        labels={\"\
+          mlflow_uri\": model_uri},\n    )\n\n"
+        image: python:3.10
+    exec-fetch-op:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - fetch_op
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'pandas' 'requests'\
+          \ 'boto3' 'kfp' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef fetch_op(raw_data: Annotated[Output[Dataset], \"raw_data\"],\n\
+          \             news_api_key: str,\n             endpoint: str):\n    import\
+          \ os\n    import requests\n    import pandas as pd\n    import boto3\n\n\
+          \n    categories = ['business', 'sports', 'technology']\n    articles =\
+          \ []\n\n    for category in categories:\n        url = f'https://newsapi.org/v2/top-headlines?category={category}&apiKey={news_api_key}&pageSize=50'\n\
+          \        resp = requests.get(url)\n        print(resp)\n        data = resp.json()\n\
+          \        for article in data['articles']:\n            articles.append({\n\
+          \                'title': article['title'],\n                'description':\
+          \ article['description'],\n                'category': category\n      \
+          \      })\n\n    df = pd.DataFrame(articles)\n    df.to_csv(raw_data.path,\
+          \ index=False)\n\n    s3 = boto3.client(\n        's3',\n        endpoint_url=endpoint,\n\
+          \        aws_access_key_id='minioadmin',\n        aws_secret_access_key='minioadmin123'\n\
+          \    )\n    s3.upload_file(raw_data.path, 'mlops', 'data/news_raw.csv')\n\
+          \n"
+        image: python:3.10
+    exec-preprocess-op:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - preprocess_op
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'pandas' 'boto3'\
+          \ 'scikit-learn' 'kfp' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef preprocess_op(\n    raw_data: Annotated[Input[Dataset], \"raw_data\"\
+          ],\n    train_data: Annotated[Output[Dataset], \"train_data\"],\n    val_data:\
+          \ Annotated[Output[Dataset], \"val_data\"],\n    endpoint:str\n):\n    import\
+          \ pandas as pd\n    import boto3\n    import os\n    from sklearn.model_selection\
+          \ import train_test_split\n\n    s3 = boto3.client(\n        's3',\n   \
+          \     endpoint_url=endpoint,\n        aws_access_key_id='minioadmin',\n\
+          \        aws_secret_access_key='minioadmin123'\n    )\n\n    local_raw_file\
+          \ = 'news_raw.csv'\n    local_train_file = 'train.csv'\n    local_val_file\
+          \ = 'val.csv'\n\n    s3.download_file('mlops', 'data/news_raw.csv', local_raw_file)\n\
+          \n    df = pd.read_csv(local_raw_file)\n    df = df.dropna(subset=['title',\
+          \ 'description'])\n    df['text'] = df['title'] + \". \" + df['description']\n\
+          \n    x_train, x_val, y_train, y_val = train_test_split(\n        df['text'],\
+          \ df['category'], test_size=0.2, random_state=42, stratify=df['category']\n\
+          \    )\n\n    train_df = pd.DataFrame({'text': x_train, 'category': y_train})\n\
+          \    val_df = pd.DataFrame({'text': x_val, 'category': y_val})\n\n    train_df.to_csv(train_data.path,\
+          \ index=False)  # KFP-managed path\n    val_df.to_csv(val_data.path, index=False)\n\
+          \n    # Upload for downstream persistence\n    s3.upload_file(train_data.path,\
+          \ 'mlops', 'data/train.csv')\n    s3.upload_file(val_data.path, 'mlops',\
+          \ 'data/val.csv')\n\n    for file in [local_raw_file]:\n        try:\n \
+          \           os.remove(file)\n        except OSError as e:\n            print(f\"\
+          Error removing file {file}: {e}\")\n\n"
+        image: python:3.10
+    exec-train-op:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - train_op
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'pandas' 'torch'\
+          \ 'transformers' 'mlflow==2.13.0' 'boto3' 'kfp' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef train_op(\n    train_data: Annotated[Input[Dataset], \"train_data\"\
+          ],\n    val_data: Annotated[Input[Dataset], \"val_data\"],\n    endpoint:\
+          \ str,\n    epochs: int = 1\n):\n    import os\n    import pandas as pd\n\
+          \    import torch\n    from torch.utils.data import DataLoader\n    from\
+          \ torch.optim import AdamW\n    from transformers import AutoTokenizer,\
+          \ AutoModelForSequenceClassification\n    import mlflow\n    import mlflow.pyfunc\n\
+          \    import boto3\n    from torch.serialization import safe_globals\n\n\
+          \    # --- Environment Setup ---\n    os.environ[\"MLFLOW_S3_ENDPOINT_URL\"\
+          ] = endpoint\n    os.environ[\"AWS_ACCESS_KEY_ID\"] = 'minioadmin'\n   \
+          \ os.environ[\"AWS_SECRET_ACCESS_KEY\"] = 'minioadmin123'\n    mlflow.set_tracking_uri(\"\
+          http://mlflow.mlops.svc.cluster.local:5000\")\n    mlflow.set_experiment(\"\
+          news-classification\")\n\n    # --- Upload datasets to MinIO (optional)\
+          \ ---\n    boto_session = boto3.session.Session()\n    s3 = boto_session.client(\n\
+          \        's3',\n        endpoint_url=endpoint,\n        aws_access_key_id='minioadmin',\n\
+          \        aws_secret_access_key='minioadmin123'\n    )\n    s3.upload_file(train_data.path,\
+          \ 'mlops', 'data/train.csv')\n    s3.upload_file(val_data.path, 'mlops',\
+          \ 'data/val.csv')\n\n    # --- Load data ---\n    train_df = pd.read_csv(train_data.path)\n\
+          \    val_df = pd.read_csv(val_data.path)\n\n    # --- Prepare model and\
+          \ tokenizer ---\n    tokenizer = AutoTokenizer.from_pretrained('distilbert-base-uncased')\n\
+          \    num_categories = train_df['category'].nunique()\n\n    model = AutoModelForSequenceClassification.from_pretrained(\n\
+          \        'distilbert-base-uncased', num_labels=num_categories\n    )\n\n\
+          \    train_enc = tokenizer(train_df['text'].tolist(), padding=True, truncation=True,\
+          \ return_tensors=\"pt\")\n    train_labels = torch.tensor(pd.Categorical(train_df['category']).codes,\
+          \ dtype=torch.long)\n    train_dataset = torch.utils.data.TensorDataset(train_enc['input_ids'],\
+          \ train_enc['attention_mask'], train_labels)\n    train_loader = DataLoader(train_dataset,\
+          \ batch_size=8, shuffle=True)\n\n    optimizer = AdamW(model.parameters(),\
+          \ lr=2e-5)\n\n    # --- Training ---\n    mlflow.start_run()\n    mlflow.log_param(\"\
+          epochs\", epochs)\n    model.train()\n\n    for epoch in range(epochs):\n\
+          \        total_loss = 0\n        for input_ids, attention_mask, labels in\
+          \ train_loader:\n            outputs = model(input_ids=input_ids, attention_mask=attention_mask,\
+          \ labels=labels)\n            loss = outputs.loss\n            optimizer.zero_grad()\n\
+          \            loss.backward()\n            optimizer.step()\n           \
+          \ total_loss += loss.item()\n        avg_loss = total_loss / len(train_loader)\n\
+          \        mlflow.log_metric(\"train_loss\", avg_loss, step=epoch)\n\n   \
+          \ # --- Save raw PyTorch model locally ---\n    torch.save(model, \"model.pt\"\
+          )\n\n    # --- Define custom PythonModel wrapper ---\n    class NewsClassifierWrapper(mlflow.pyfunc.PythonModel):\n\
+          \        def load_context(self, context):\n            import torch\n  \
+          \          from transformers import AutoTokenizer\n            self.model\
+          \ = torch.load(context.artifacts[\"model_path\"],\n                    \
+          \                weights_only=False)\n            self.model.eval()\n  \
+          \          self.tokenizer = AutoTokenizer.from_pretrained(\"distilbert-base-uncased\"\
+          )\n\n        def predict(self, context, model_input):\n            import\
+          \ torch\n            texts = model_input[\"text\"].tolist()\n          \
+          \  tokens = self.tokenizer(\n                texts, padding=True, truncation=True,\n\
+          \                return_tensors=\"pt\", max_length=512\n            )\n\
+          \            with torch.no_grad():\n                outputs = self.model(**tokens)\n\
+          \                preds = torch.argmax(outputs.logits, dim=1).numpy()\n \
+          \           return preds\n\n    # --- Log as PyFunc with preprocessing included\
+          \ ---\n    mlflow.pyfunc.log_model(\n        artifact_path=\"model\",\n\
+          \        python_model=NewsClassifierWrapper(),\n        artifacts={\"model_path\"\
+          : \"model.pt\"}\n    )\n\n    mlflow.end_run()\n\n"
+        image: python:3.10
+pipelineInfo:
+  name: news-classification-full
+root:
+  dag:
+    tasks:
+      download-model-op:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-download-model-op
+        dependentTasks:
+        - train-op
+        inputs:
+          parameters:
+            endpoint:
+              runtimeValue:
+                constant: http://minio.mlops.svc.cluster.local:9000
+        taskInfo:
+          name: download-model-op
+      fetch-op:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-fetch-op
+        inputs:
+          parameters:
+            endpoint:
+              componentInputParameter: endpoint
+            news_api_key:
+              componentInputParameter: news_api_key
+        taskInfo:
+          name: fetch-op
+      preprocess-op:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-preprocess-op
+        dependentTasks:
+        - fetch-op
+        inputs:
+          artifacts:
+            raw_data:
+              taskOutputArtifact:
+                outputArtifactKey: raw_data
+                producerTask: fetch-op
+          parameters:
+            endpoint:
+              componentInputParameter: endpoint
+        taskInfo:
+          name: preprocess-op
+      train-op:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-train-op
+        dependentTasks:
+        - preprocess-op
+        inputs:
+          artifacts:
+            train_data:
+              taskOutputArtifact:
+                outputArtifactKey: train_data
+                producerTask: preprocess-op
+            val_data:
+              taskOutputArtifact:
+                outputArtifactKey: val_data
+                producerTask: preprocess-op
+          parameters:
+            endpoint:
+              runtimeValue:
+                constant: http://minio.mlops.svc.cluster.local:9000
+            epochs:
+              runtimeValue:
+                constant: 1.0
+        taskInfo:
+          name: train-op
+  inputDefinitions:
+    parameters:
+      endpoint:
+        parameterType: STRING
+      news_api_key:
+        parameterType: STRING
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.13.0

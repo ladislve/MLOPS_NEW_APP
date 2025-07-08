@@ -1,0 +1,15 @@
+service: "service:NewsClassifier"
+
+labels:
+  owner: "kolia"
+  project: "news-classifier"
+
+include:
+  - "service.py"
+
+python:
+  packages:
+    - "mlflow==2.13.0"
+    - "torch"
+    - "transformers"
+    - "pandas"
