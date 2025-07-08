@@ -81,7 +81,7 @@ deploymentSpec:
           \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
           \  python3 -m pip install --quiet --no-warn-script-location 'mlflow==2.13.0'\
-          \ 'bentoml' 'boto3' && \"$0\" \"$@\"\n"
+          \ 'bentoml' 'boto3' 'kubernetes' && \"$0\" \"$@\"\n"
         - sh
         - -ec
         - 'program_path=$(mktemp -d)
@@ -94,17 +94,74 @@ deploymentSpec:
           '
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
           \ *\n\ndef download_model_op(endpoint: str):\n    import os\n    import\
-          \ mlflow\n    import bentoml\n\n    mlflow.set_tracking_uri(\"http://mlflow.mlops.svc.cluster.local:5000\"\
+          \ mlflow\n    import bentoml\n    import requests\n    from kubernetes import\
+          \ client, config\n\n    # Load Kubernetes config\n    config.load_incluster_config()\n\
+          \    apps_v1 = client.AppsV1Api()\n    core_v1 = client.CoreV1Api()\n\n\
+          \    # --- MLflow model export ---\n    mlflow.set_tracking_uri(\"http://mlflow.mlops.svc.cluster.local:5000\"\
           )\n    os.environ[\"MLFLOW_S3_ENDPOINT_URL\"] = endpoint\n    os.environ[\"\
           AWS_ACCESS_KEY_ID\"] = \"minioadmin\"\n    os.environ[\"AWS_SECRET_ACCESS_KEY\"\
-          ] = \"minioadmin123\"\n\n    client = mlflow.MlflowClient()\n    experiment\
-          \ = client.get_experiment_by_name(\"news-classification\")\n    runs = client.search_runs(experiment.experiment_id,\
-          \ order_by=[\"start_time DESC\"])\n    run_id = runs[0].info.run_id\n  \
-          \  model_uri = f\"runs:/{run_id}/model\"\n\n    print(f\"Importing model\
-          \ from {model_uri} into BentoML...\")\n    bentoml.mlflow.import_model(\n\
-          \        name=\"news_classifier\",\n        model_uri=model_uri,\n     \
-          \   signatures={\"predict\": {\"batchable\": False}},\n        labels={\"\
-          mlflow_uri\": model_uri},\n    )\n\n"
+          ] = \"minioadmin123\"\n\n    client_mlflow = mlflow.MlflowClient()\n   \
+          \ experiment = client_mlflow.get_experiment_by_name(\"news-classification\"\
+          )\n    runs = client_mlflow.search_runs(experiment.experiment_id, order_by=[\"\
+          start_time DESC\"])\n    new_run = runs[0]\n    run_id = new_run.info.run_id\n\
+          \    model_uri = f\"runs:/{run_id}/model\"\n\n    new_loss = new_run.data.metrics.get(\"\
+          train_loss\", float(\"inf\"))\n\n    # --- Get current model's loss ---\n\
+          \    all_models = bentoml.models.list()\n    current_models = [m for m in\
+          \ all_models if m.tag.name == \"news_classifier\" and \"mlflow_uri\" in\
+          \ m.info.labels]\n    current_loss = float(\"inf\")\n    for model in current_models:\n\
+          \        try:\n            uri = model.info.labels[\"mlflow_uri\"]\n   \
+          \         parts = uri.split(\"/\")\n            run_id_candidate = parts[1]\
+          \ if len(parts) > 1 else \"\"\n            if run_id_candidate:\n      \
+          \          old_run = client_mlflow.get_run(run_id_candidate)\n         \
+          \       loss = old_run.data.metrics.get(\"train_loss\", float(\"inf\"))\n\
+          \                if loss < current_loss:\n                    current_loss\
+          \ = loss\n        except Exception as e:\n            print(f\"Warning:\
+          \ couldn't retrieve loss from label or run ID: {e}\")\n\n    print(f\"New\
+          \ model loss: {new_loss}, Current model loss: {current_loss}\")\n    print(\"\
+          Found models:\")\n    for model in current_models:\n        print(f\"- Tag:\
+          \ {model.tag}, Label: {model.info.labels.get('mlflow_uri')}\")\n\n\n   \
+          \ if new_loss >= current_loss:\n        print(\"New model did not improve.\
+          \ Skipping deployment.\")\n        return\n\n    # --- Import model into\
+          \ BentoML ---\n    print(f\"Importing model from {model_uri} into BentoML...\"\
+          )\n    bentoml.mlflow.import_model(\n        name=\"news_classifier\",\n\
+          \        model_uri=model_uri,\n        signatures={\"predict\": {\"batchable\"\
+          : False}},\n        labels={\"mlflow_uri\": model_uri},\n    )\n\n    #\
+          \ --- Determine current and next versions ---\n    try:\n        svc = core_v1.read_namespaced_service(name=\"\
+          news-classifier\", namespace=\"mlops\")\n        current_version = svc.spec.selector.get(\"\
+          version\", \"v1\")\n    except:\n        current_version = \"v1\"\n\n  \
+          \  next_version = \"v2\" if current_version == \"v1\" else \"v1\"\n\n  \
+          \  # --- Create new deployment ---\n    new_deployment = client.V1Deployment(\n\
+          \        metadata=client.V1ObjectMeta(name=f\"news-classifier-{next_version}\"\
+          , namespace=\"mlops\"),\n        spec=client.V1DeploymentSpec(\n       \
+          \     replicas=1,\n            selector=client.V1LabelSelector(\n      \
+          \          match_labels={\"app\": \"news-classifier\", \"version\": next_version}\n\
+          \            ),\n            template=client.V1PodTemplateSpec(\n      \
+          \          metadata=client.V1ObjectMeta(labels={\"app\": \"news-classifier\"\
+          , \"version\": next_version}),\n                spec=client.V1PodSpec(containers=[\n\
+          \                    client.V1Container(\n                        name=\"\
+          news-classifier\",\n                        image=\"news_classification:latest\"\
+          ,\n                        image_pull_policy=\"Never\",\n              \
+          \          ports=[client.V1ContainerPort(container_port=3000)]\n       \
+          \             )\n                ])\n            )\n        )\n    )\n\n\
+          \    try:\n        apps_v1.create_namespaced_deployment(namespace=\"mlops\"\
+          , body=new_deployment)\n    except client.exceptions.ApiException as e:\n\
+          \        if e.status == 409:\n            apps_v1.replace_namespaced_deployment(name=f\"\
+          news-classifier-{next_version}\", namespace=\"mlops\", body=new_deployment)\n\
+          \        else:\n            raise\n\n    # --- Wait for new pod to be ready\
+          \ ---\n    import time\n    while True:\n        pods = core_v1.list_namespaced_pod(namespace=\"\
+          mlops\", label_selector=f\"version={next_version},app=news-classifier\"\
+          )\n        if all(p.status.phase == \"Running\" and all(c.ready for c in\
+          \ p.status.container_statuses) for p in pods.items):\n            break\n\
+          \        time.sleep(2)\n\n    # --- Patch service to point to new version\
+          \ ---\n    svc.spec.selector[\"version\"] = next_version\n    core_v1.patch_namespaced_service(name=\"\
+          news-classifier\", namespace=\"mlops\", body=svc)\n\n    print(f\"Deployment\
+          \ switched to version {next_version}.\")\n\n    # --- Delete old deployment\
+          \ ---\n    old_deployment_name = f\"news-classifier-{current_version}\"\n\
+          \    try:\n        apps_v1.delete_namespaced_deployment(name=old_deployment_name,\
+          \ namespace=\"mlops\")\n        print(f\"Old deployment {old_deployment_name}\
+          \ deleted.\")\n    except client.exceptions.ApiException as e:\n       \
+          \ print(f\"Warning: could not delete old deployment {old_deployment_name}:\
+          \ {e}\")\n\n"
         image: python:3.10
     exec-fetch-op:
       container:
@@ -343,7 +400,7 @@ root:
                 constant: http://minio.mlops.svc.cluster.local:9000
             epochs:
               runtimeValue:
-                constant: 1.0
+                constant: 2.0
         taskInfo:
           name: train-op
   inputDefinitions:

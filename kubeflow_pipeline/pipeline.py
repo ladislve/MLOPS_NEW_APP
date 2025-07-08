@@ -22,7 +22,7 @@ def news_pipeline(news_api_key:str, endpoint:str):
     train_data=preprocess_task.outputs['train_data'],
     val_data=preprocess_task.outputs['val_data'],
     endpoint="http://minio.mlops.svc.cluster.local:9000",
-    epochs=1
+    epochs=2
     )   
 
     download_task = download_model_op(
