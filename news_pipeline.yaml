@@ -229,58 +229,50 @@ deploymentSpec:
           \ *\n\ndef download_model_op(endpoint: str) -> bool:\n    import os, time\n\
           \    import pandas as pd\n    import mlflow\n    from mlflow.exceptions\
           \ import MlflowException\n    from sklearn.metrics import f1_score\n   \
-          \ import boto3\n    import bentoml\n\n\n    # MLflow & MinIO config\n  \
-          \  os.environ[\"MLFLOW_S3_ENDPOINT_URL\"] = endpoint\n    os.environ[\"\
-          AWS_ACCESS_KEY_ID\"] = \"minioadmin\"\n    os.environ[\"AWS_SECRET_ACCESS_KEY\"\
-          ] = \"minioadmin123\"\n    mlflow.set_tracking_uri(\"http://mlflow.mlops.svc.cluster.local:5000\"\
-          )\n    os.environ[\"BENTOML_HOME\"] = \"/bentoml_storage\"\n    client =\
-          \ mlflow.MlflowClient()\n\n    # \u2014\u2014\u2014 1) Download both train.csv\
-          \ and val.csv so we can rebuild your union label map\n    s3 = boto3.client(\n\
-          \        \"s3\", endpoint_url=endpoint,\n        aws_access_key_id=\"minioadmin\"\
-          , aws_secret_access_key=\"minioadmin123\"\n    )\n    s3.download_file(\"\
+          \ import boto3\n    import bentoml\n\n\n    os.environ[\"MLFLOW_S3_ENDPOINT_URL\"\
+          ] = endpoint\n    os.environ[\"AWS_ACCESS_KEY_ID\"] = \"minioadmin\"\n \
+          \   os.environ[\"AWS_SECRET_ACCESS_KEY\"] = \"minioadmin123\"\n    mlflow.set_tracking_uri(\"\
+          http://mlflow.mlops.svc.cluster.local:5000\")\n    os.environ[\"BENTOML_HOME\"\
+          ] = \"/bentoml_storage\"\n    client = mlflow.MlflowClient()\n\n    s3 =\
+          \ boto3.client(\n        \"s3\", endpoint_url=endpoint,\n        aws_access_key_id=\"\
+          minioadmin\", aws_secret_access_key=\"minioadmin123\"\n    )\n    s3.download_file(\"\
           mlops\", \"data/train.csv\", \"train.csv\")\n    s3.download_file(\"mlops\"\
           , \"data/val.csv\",   \"val.csv\")\n\n    train_df = pd.read_csv(\"train.csv\"\
-          )\n    val_df   = pd.read_csv(\"val.csv\")\n\n    # \u2014\u2014\u2014 2)\
-          \ Rebuild exactly the union label2id mapping you used in training\n    s3.download_file('mlops',\
+          )\n    val_df   = pd.read_csv(\"val.csv\")\n\n    s3.download_file('mlops',\
           \ 'data/labels.json', 'labels.json')\n    import json\n    with open('labels.json')\
           \ as f:\n        label_list = json.load(f)\n    label2id = {lbl: i for i,\
-          \ lbl in enumerate(label_list)}\n\n    # 2) Map your val_df categories to\
-          \ codes\n    true_codes = val_df['category'].map(label2id).astype(int).tolist()\n\
-          \n    # \u2014\u2014\u2014 3) Evaluate Production model via PyFunc (so that\
-          \ index outputs align with label2id)\n    prod_f1 = -float(\"inf\")\n  \
-          \  try:\n        prod_pyfunc = mlflow.pyfunc.load_model(\"models:/news_classifier/Production\"\
-          )\n        prod_preds  = prod_pyfunc.predict(val_df)  # returns ints in\
-          \ [0..num_labels)\n        prod_codes  = pd.Series(prod_preds).astype(int).tolist()\n\
-          \        prod_f1     = f1_score(true_codes, prod_codes, average=\"weighted\"\
+          \ lbl in enumerate(label_list)}\n\n    true_codes = val_df['category'].map(label2id).astype(int).tolist()\n\
+          \n    prod_f1 = -float(\"inf\")\n    try:\n        prod_pyfunc = mlflow.pyfunc.load_model(\"\
+          models:/news_classifier/Production\")\n        prod_preds  = prod_pyfunc.predict(val_df)\n\
+          \        prod_codes  = pd.Series(prod_preds).astype(int).tolist()\n    \
+          \    prod_f1     = f1_score(true_codes, prod_codes, average=\"weighted\"\
           )\n    except MlflowException:\n        print(\"No existing Production model;\
           \ setting prod_f1 = -inf\")\n    print(f\"Production model eval F1 = {prod_f1:.4f}\"\
-          )\n\n    # \u2014\u2014\u2014 4) Grab the most recent run\u2019s logged\
-          \ final_val_f1 as your challenger\u2019s score\n    exp  = client.get_experiment_by_name(\"\
-          news-classification\")\n    runs = client.search_runs(\n        experiment_ids=[exp.experiment_id],\n\
+          )\n\n    exp  = client.get_experiment_by_name(\"news-classification\")\n\
+          \    runs = client.search_runs(\n        experiment_ids=[exp.experiment_id],\n\
           \        order_by=[\"attributes.start_time DESC\"],\n        max_results=1\n\
           \    )\n    if not runs:\n        raise RuntimeError(\"No runs found for\
           \ 'news-classification'.\")\n    challenger = runs[0]\n    run_id     =\
           \ challenger.info.run_id\n    challenger_f1 = challenger.data.metrics.get(\"\
           final_val_f1\")\n    if challenger_f1 is None:\n        raise RuntimeError(f\"\
           Latest run {run_id} missing final_val_f1 metric.\")\n    print(f\"Challenger\
-          \ run {run_id} logged F1 = {challenger_f1:.4f}\")\n\n    # \u2014\u2014\u2014\
-          \ 5) If challenger\u2019s logged F1 > actual Production F1, register & promote\n\
-          \    should_reload = False\n    if challenger_f1 > prod_f1:\n        print(\"\
-          Promoting new model to Production.\")\n        reg = mlflow.register_model(model_uri=f\"\
+          \ run {run_id} logged F1 = {challenger_f1:.4f}\")\n\n    should_reload =\
+          \ False\n    if challenger_f1 > prod_f1:\n        print(\"Promoting new\
+          \ model to Production.\")\n        reg = mlflow.register_model(model_uri=f\"\
           runs:/{run_id}/model\", name=\"news_classifier\")\n        version = reg.version\n\
-          \        # wait for READY\n        for _ in range(20):\n            mv =\
-          \ client.get_model_version(\"news_classifier\", version)\n            if\
-          \ mv.status == \"READY\":\n                break\n            time.sleep(1)\n\
-          \        client.transition_model_version_stage(\n            name=\"news_classifier\"\
-          ,\n            version=version,\n            stage=\"Production\",\n   \
-          \         archive_existing_versions=True\n        )\n        bentoml.mlflow.import_model(\n\
-          \            name=\"news_classifier\",\n            model_uri=f\"runs:/{run_id}/model\"\
-          ,\n            signatures={\"predict\": {\"batchable\": False}},\n     \
-          \       labels={\n                \"mlflow_run_id\": run_id,\n         \
-          \       \"final_val_f1\": f\"{challenger_f1:.4f}\",\n                \"\
-          mlflow_version\": str(version)\n            }\n        )\n        should_reload\
-          \ = True\n    else:\n        print(\"No promotion needed; Production remains\
-          \ best or equal.\")\n\n\n\n\n    return should_reload\n\n"
+          \        for _ in range(20):\n            mv = client.get_model_version(\"\
+          news_classifier\", version)\n            if mv.status == \"READY\":\n  \
+          \              break\n            time.sleep(1)\n        client.transition_model_version_stage(\n\
+          \            name=\"news_classifier\",\n            version=version,\n \
+          \           stage=\"Production\",\n            archive_existing_versions=True\n\
+          \        )\n        bentoml.mlflow.import_model(\n            name=\"news_classifier\"\
+          ,\n            model_uri=f\"runs:/{run_id}/model\",\n            signatures={\"\
+          predict\": {\"batchable\": False}},\n            labels={\n            \
+          \    \"mlflow_run_id\": run_id,\n                \"final_val_f1\": f\"{challenger_f1:.4f}\"\
+          ,\n                \"mlflow_version\": str(version)\n            }\n   \
+          \     )\n        should_reload = True\n    else:\n        print(\"No promotion\
+          \ needed; Production remains best or equal.\")\n\n\n\n\n    return should_reload\n\
+          \n"
         image: python:3.10
     exec-fetch-api-op:
       container:
@@ -312,15 +304,13 @@ deploymentSpec:
           \ *\n\ndef fetch_api_op(\n    raw_data: Annotated[Output[Dataset], \"raw_data\"\
           ],\n    endpoint: str,\n    gnews_api_key: str,\n    mediastack_access_key:\
           \ str,\n    newsapi_api_key: str,\n    aws_access_key_id: str = 'minioadmin',\n\
-          \    aws_secret_access_key: str = 'minioadmin123'\n):\n    \"\"\"\n    Fetches\
-          \ articles from GNews, Mediastack, HackerNews (via RSS),\n    and NewsAPI,\
-          \ scrapes each for text, writes a CSV, and uploads to MinIO.\n    \"\"\"\
-          \n    import requests\n    import pandas as pd\n    import time\n    from\
-          \ newspaper import Article\n    import boto3\n\n    def scrape_article_text(url):\n\
-          \        try:\n            art = Article(url)\n            art.download()\n\
-          \            art.parse()\n            return art.text[:500]\n        except:\n\
-          \            return \"\"\n\n    def fetch_gnews_articles():\n        url\
-          \ = f\"https://gnews.io/api/v4/search?q=world&lang=en&max=7&token={gnews_api_key}\"\
+          \    aws_secret_access_key: str = 'minioadmin123'\n):\n    import requests\n\
+          \    import pandas as pd\n    import time\n    from newspaper import Article\n\
+          \    import boto3\n\n    def scrape_article_text(url):\n        try:\n \
+          \           art = Article(url)\n            art.download()\n           \
+          \ art.parse()\n            return art.text[:500]\n        except:\n    \
+          \        return \"\"\n\n    def fetch_gnews_articles():\n        url = f\"\
+          https://gnews.io/api/v4/search?q=world&lang=en&max=7&token={gnews_api_key}\"\
           \n        resp = requests.get(url)\n        data = resp.json()\n       \
           \ arts = []\n        for item in data.get(\"articles\", []):\n         \
           \   title = item.get(\"title\", \"\").strip()\n            link = item.get(\"\
@@ -358,15 +348,14 @@ deploymentSpec:
           \                        \"source\": f\"NewsAPI-{cat}\",\n             \
           \           \"title\": title,\n                        \"text\": text,\n\
           \                        \"link\": link\n                    })\n      \
-          \          time.sleep(0.05)\n        return arts\n\n    # Collect all articles\n\
-          \    all_articles = []\n    all_articles.extend(fetch_gnews_articles())\n\
-          \    all_articles.extend(fetch_hn_rssapi())\n    all_articles.extend(fetch_mediastack_articles())\n\
-          \    all_articles.extend(fetch_newsapi_articles())\n\n    # Write DataFrame\
-          \ to CSV\n    df = pd.DataFrame(all_articles)\n    df.to_csv(raw_data.path,\
-          \ index=False)\n\n    # Upload to MinIO\n    s3 = boto3.client(\n      \
-          \  's3',\n        endpoint_url=endpoint,\n        aws_access_key_id=aws_access_key_id,\n\
-          \        aws_secret_access_key=aws_secret_access_key\n    )\n    s3.upload_file(raw_data.path,\
-          \ 'mlops', 'data/news_api_raw.csv')\n\n"
+          \          time.sleep(0.05)\n        return arts\n\n    all_articles = []\n\
+          \    all_articles.extend(fetch_gnews_articles())\n    all_articles.extend(fetch_hn_rssapi())\n\
+          \    all_articles.extend(fetch_mediastack_articles())\n    all_articles.extend(fetch_newsapi_articles())\n\
+          \n    df = pd.DataFrame(all_articles)\n    df.to_csv(raw_data.path, index=False)\n\
+          \n    s3 = boto3.client(\n        's3',\n        endpoint_url=endpoint,\n\
+          \        aws_access_key_id=aws_access_key_id,\n        aws_secret_access_key=aws_secret_access_key\n\
+          \    )\n    s3.upload_file(raw_data.path, 'mlops', 'data/news_api_raw.csv')\n\
+          \n"
         image: python:3.10-slim
     exec-fetch-rss-op:
       container:
@@ -397,12 +386,9 @@ deploymentSpec:
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
           \ *\n\ndef fetch_rss_op(\n    raw_data: Annotated[Output[Dataset], \"raw_data\"\
           ],\n    endpoint: str,\n    aws_access_key_id: str = 'minioadmin',\n   \
-          \ aws_secret_access_key: str = 'minioadmin123'\n):\n    \"\"\"\n    Fetches\
-          \ the latest entries from a set of RSS feeds, scrapes\n    each article\
-          \ (up to 500 chars), writes a CSV, and uploads it\n    to MinIO.\n    \"\
-          \"\"\n    import feedparser\n    from newspaper import Article\n    import\
-          \ pandas as pd\n    import time\n    import boto3\n\n    # List of RSS feeds\
-          \ to pull from\n    rss_list = [\n        'https://feeds.bbci.co.uk/news/world/rss.xml',\n\
+          \ aws_secret_access_key: str = 'minioadmin123'\n):\n    import feedparser\n\
+          \    from newspaper import Article\n    import pandas as pd\n    import\
+          \ time\n    import boto3\n\n    rss_list = [\n        'https://feeds.bbci.co.uk/news/world/rss.xml',\n\
           \        'https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en',\n    \
           \    'https://www.yahoo.com/news/rss',\n        'https://www.theguardian.com/world/rss',\n\
           \        'https://www.reddit.com/r/science/.rss',\n        'https://www.theguardian.com/science/space/rss',\n\
@@ -410,22 +396,20 @@ deploymentSpec:
           \        'https://feeds.megaphone.fm/vergecast',\n        'https://feeds.feedburner.com/speedhunters',\n\
           \        'https://medium.com/feed/hackernoon',\n        'https://www.reddit.com/r/programming/.rss'\n\
           \    ]\n\n    records = []\n\n    for url in rss_list:\n        feed = feedparser.parse(url)\n\
-          \        if feed.bozo:\n            print(f\"\u26A0\uFE0F Failed to parse:\
-          \ {url}\")\n            continue\n\n        for entry in feed.entries[:7]:\n\
-          \            link  = entry.get('link', '').strip()\n            title =\
-          \ entry.get('title', '').strip()\n            try:\n                article\
-          \ = Article(link)\n                article.download()\n                article.parse()\n\
-          \                text_snippet = article.text[:200]\n                if title\
+          \        if feed.bozo:\n            print(f\"Failed to parse: {url}\")\n\
+          \            continue\n\n        for entry in feed.entries[:7]:\n      \
+          \      link  = entry.get('link', '').strip()\n            title = entry.get('title',\
+          \ '').strip()\n            try:\n                article = Article(link)\n\
+          \                article.download()\n                article.parse()\n \
+          \               text_snippet = article.text[:200]\n                if title\
           \ and text_snippet:\n                    records.append({\n            \
           \            'title': title,\n                        'text': text_snippet,\n\
           \                        'link': link\n                    })\n        \
-          \        # polite crawling delay\n                time.sleep(0.05)\n   \
-          \         except Exception as e:\n                print(f\"\u274C Failed\
-          \ to scrape {link}: {e}\")\n\n    # Write out CSV\n    df = pd.DataFrame(records)\n\
-          \    df.to_csv(raw_data.path, index=False)\n\n    # Upload to MinIO\n  \
-          \  s3 = boto3.client(\n        's3',\n        endpoint_url=endpoint,\n \
-          \       aws_access_key_id=aws_access_key_id,\n        aws_secret_access_key=aws_secret_access_key\n\
-          \    )\n    # adjust bucket/key as you like\n    s3.upload_file(raw_data.path,\
+          \        time.sleep(0.05)\n            except Exception as e:\n        \
+          \        print(f\"Failed to scrape {link}: {e}\")\n\n    df = pd.DataFrame(records)\n\
+          \    df.to_csv(raw_data.path, index=False)\n\n    s3 = boto3.client(\n \
+          \       's3',\n        endpoint_url=endpoint,\n        aws_access_key_id=aws_access_key_id,\n\
+          \        aws_secret_access_key=aws_secret_access_key\n    )\n    s3.upload_file(raw_data.path,\
           \ 'mlops', 'data/rss_raw.csv')\n\n"
         image: python:3.10-slim
     exec-fetch-scrape-op:
@@ -458,12 +442,10 @@ deploymentSpec:
           \ *\n\ndef fetch_scrape_op(\n    raw_data: Annotated[Output[Dataset], \"\
           raw_data\"],\n    endpoint: str,\n    aws_access_key_id: str = 'minioadmin',\n\
           \    aws_secret_access_key: str = 'minioadmin123',\n    max_workers: int\
-          \ = 5\n):\n    \"\"\"\n    Scrapes multiple news sites in parallel using\
-          \ FastNewsScraper,\n    writes a CSV of title/text/link/site, and uploads\
-          \ to MinIO.\n    \"\"\"\n    import requests\n    from bs4 import BeautifulSoup\n\
-          \    import pandas as pd\n    import time\n    from urllib.parse import\
-          \ urljoin\n    from concurrent.futures import ThreadPoolExecutor, as_completed\n\
-          \    import boto3\n\n    class FastNewsScraper:\n        def __init__(self,\
+          \ = 5\n):\n    import requests\n    from bs4 import BeautifulSoup\n    import\
+          \ pandas as pd\n    import time\n    from urllib.parse import urljoin\n\
+          \    from concurrent.futures import ThreadPoolExecutor, as_completed\n \
+          \   import boto3\n\n    class FastNewsScraper:\n        def __init__(self,\
           \ max_workers=5):\n            self.session = requests.Session()\n     \
           \       self.session.headers.update({\n                'User-Agent': 'Mozilla/5.0\
           \ (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'\n            })\n  \
@@ -526,12 +508,12 @@ deploymentSpec:
           \                for fut in as_completed(futs):\n                    try:\n\
           \                        all_art.extend(fut.result())\n                \
           \    except:\n                        pass\n            return all_art\n\
-          \n    # Run scraper\n    scraper = FastNewsScraper(max_workers)\n    articles\
-          \ = scraper.scrape_all()\n    df = pd.DataFrame(articles)\n    df.to_csv(raw_data.path,\
-          \ index=False)\n\n    # Upload to MinIO\n    s3 = boto3.client(\n      \
-          \  's3',\n        endpoint_url=endpoint,\n        aws_access_key_id=aws_access_key_id,\n\
-          \        aws_secret_access_key=aws_secret_access_key\n    )\n    s3.upload_file(raw_data.path,\
-          \ 'mlops', 'data/news_fast.csv')\n\n"
+          \n    scraper = FastNewsScraper(max_workers)\n    articles = scraper.scrape_all()\n\
+          \    df = pd.DataFrame(articles)\n    df.to_csv(raw_data.path, index=False)\n\
+          \n    s3 = boto3.client(\n        's3',\n        endpoint_url=endpoint,\n\
+          \        aws_access_key_id=aws_access_key_id,\n        aws_secret_access_key=aws_secret_access_key\n\
+          \    )\n    s3.upload_file(raw_data.path, 'mlops', 'data/news_fast.csv')\n\
+          \n"
         image: python:3.10-slim
     exec-merge-data-op:
       container:
@@ -564,21 +546,17 @@ deploymentSpec:
           ],\n    scrape_data: Annotated[Input[Dataset], \"scrape_data\"],\n    api_data:\
           \ Annotated[Input[Dataset], \"api_data\"],\n    merged_data: Annotated[Output[Dataset],\
           \ \"merged_data\"],\n    endpoint: str,\n    aws_access_key_id: str = 'minioadmin',\n\
-          \    aws_secret_access_key: str = 'minioadmin123'\n):\n    \"\"\"\n    Reads\
-          \ three datasets (RSS, scraped sites, API), merges on unique 'link',\n \
-          \   writes a CSV, uploads to MinIO with versioning enabled.\n    \"\"\"\n\
-          \    import pandas as pd\n    import boto3\n\n    # Load individual datasets\n\
-          \    df_rss    = pd.read_csv(rss_data.path)\n    df_scrape = pd.read_csv(scrape_data.path)\n\
-          \    df_api    = pd.read_csv(api_data.path)\n\n    # Concatenate and dedupe\
-          \ by 'link'\n    df_all  = pd.concat([df_rss, df_scrape, df_api], ignore_index=True)\n\
-          \    df_uniq = df_all.drop_duplicates(subset=['link'])\n\n    # Write merged\
-          \ CSV\n    df_uniq.to_csv(merged_data.path, index=False)\n\n    # Upload\
-          \ to MinIO (bucket versioning must be enabled)\n    s3 = boto3.client(\n\
-          \        's3',\n        endpoint_url=endpoint,\n        aws_access_key_id=aws_access_key_id,\n\
-          \        aws_secret_access_key=aws_secret_access_key\n    )\n    with open(merged_data.path,\
-          \ 'rb') as f:\n        resp = s3.put_object(Bucket='mlops', Key='data/merged.csv',\
-          \ Body=f)\n    version_id = resp.get('VersionId')\n    print(f\"Uploaded\
-          \ 'data/merged.csv' with version ID: {version_id}\")\n\n"
+          \    aws_secret_access_key: str = 'minioadmin123'\n):\n    import pandas\
+          \ as pd\n    import boto3\n\n    df_rss    = pd.read_csv(rss_data.path)\n\
+          \    df_scrape = pd.read_csv(scrape_data.path)\n    df_api    = pd.read_csv(api_data.path)\n\
+          \n    df_all  = pd.concat([df_rss, df_scrape, df_api], ignore_index=True)\n\
+          \    df_uniq = df_all.drop_duplicates(subset=['link'])\n\n    df_uniq.to_csv(merged_data.path,\
+          \ index=False)\n\n    s3 = boto3.client(\n        's3',\n        endpoint_url=endpoint,\n\
+          \        aws_access_key_id=aws_access_key_id,\n        aws_secret_access_key=aws_secret_access_key\n\
+          \    )\n    with open(merged_data.path, 'rb') as f:\n        resp = s3.put_object(Bucket='mlops',\
+          \ Key='data/merged.csv', Body=f)\n    version_id = resp.get('VersionId')\n\
+          \    print(f\"Uploaded 'data/merged.csv' with version ID: {version_id}\"\
+          )\n\n"
         image: python:3.10-slim
     exec-preprocess-op:
       container:
@@ -611,51 +589,44 @@ deploymentSpec:
           merged_data\"],\n    endpoint: str,\n    api_key: str,\n    train_data:\
           \ Annotated[Output[Dataset], \"train_data\"],\n    val_data: Annotated[Output[Dataset],\
           \ \"val_data\"],\n    aws_access_key_id: str = 'minioadmin',\n    aws_secret_access_key:\
-          \ str = 'minioadmin123',\n):\n    \"\"\"\n    Loads merged_data.csv, uses\
-          \ Gemini 2.0-Flash-Lite to categorize each article into a broad category,\n\
-          \    splits into train/val, writes CSVs, and uploads them to MinIO.\n  \
-          \  \"\"\"\n    import os\n    import pandas as pd\n    import asyncio\n\
-          \    from concurrent.futures import ThreadPoolExecutor\n    import google.generativeai\
-          \ as genai\n    from sklearn.model_selection import train_test_split\n \
-          \   import boto3\n\n    # Configure Gemini\n    os.environ['GOOGLE_API_KEY']\
+          \ str = 'minioadmin123',\n):\n    import os\n    import pandas as pd\n \
+          \   import asyncio\n    from concurrent.futures import ThreadPoolExecutor\n\
+          \    import google.generativeai as genai\n    from sklearn.model_selection\
+          \ import train_test_split\n    import boto3\n\n    os.environ['GOOGLE_API_KEY']\
           \ = api_key\n    genai.configure(api_key=api_key)\n    model = genai.GenerativeModel('gemini-2.0-flash-lite')\n\
-          \n    # Load data\n    df = pd.read_csv(merged_data.path)\n\n    # Prompt\
-          \ builder\n    def build_prompt(text: str) -> str:\n        return (\n \
-          \           \"You are an expert at analyzing news articles. Read the following\
-          \ article and assign it to a general category. \"\n            \"Don't use\
-          \ very specific or niche labels. The category should reflect the broad subject\
-          \ matter, such as \"\n            \"'Politics', 'Technology', 'Gaming',\
-          \ 'Health', 'Sports', 'Finance', 'Crime', etc.\\n\\n\"\n            \"Output\
-          \ ONLY the category name. Do NOT include explanations or anything else.\\\
-          n\\n\"\n            f\"Article:\\n{text[:3000]}\\n\\nCategory:\"\n     \
-          \   )\n\n    # Synchronous call inside thread\n    def categorize_sync(prompt:\
-          \ str) -> str:\n        try:\n            response = model.generate_content(prompt)\n\
-          \            return response.text.strip().split('\\n')[0]\n        except\
+          \n    df = pd.read_csv(merged_data.path)\n\n    def build_prompt(text: str)\
+          \ -> str:\n        return (\n            \"You are an expert at analyzing\
+          \ news articles. Read the following article and assign it to a general category.\
+          \ \"\n            \"Don't use very specific or niche labels. The category\
+          \ should reflect the broad subject matter, such as \"\n            \"'Politics',\
+          \ 'Technology', 'Gaming', 'Health', 'Sports', 'Finance', 'Crime', etc.\\\
+          n\\n\"\n            \"Output ONLY the category name. Do NOT include explanations\
+          \ or anything else.\\n\\n\"\n            f\"Article:\\n{text[:3000]}\\n\\\
+          nCategory:\"\n        )\n\n    def categorize_sync(prompt: str) -> str:\n\
+          \        try:\n            response = model.generate_content(prompt)\n \
+          \           return response.text.strip().split('\\n')[0]\n        except\
           \ Exception as e:\n            print(f\"Error during categorize_sync: {e}\"\
-          )\n            return 'Unknown'\n\n    # Async wrapper\n    async def categorize_text(text:\
-          \ str, executor: ThreadPoolExecutor):\n        loop = asyncio.get_event_loop()\n\
+          )\n            return 'Unknown'\n\n    async def categorize_text(text: str,\
+          \ executor: ThreadPoolExecutor):\n        loop = asyncio.get_event_loop()\n\
           \        prompt = build_prompt(text)\n        return await loop.run_in_executor(executor,\
-          \ categorize_sync, prompt)\n\n    # Process all texts with concurrency limit\n\
-          \    async def categorize_all(texts):\n        MAX_CONCURRENT_TASKS = 5\n\
-          \        executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_TASKS)\n\
+          \ categorize_sync, prompt)\n\n    async def categorize_all(texts):\n   \
+          \     MAX_CONCURRENT_TASKS = 5\n        executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_TASKS)\n\
           \        sem = asyncio.Semaphore(MAX_CONCURRENT_TASKS)\n\n        async\
           \ def sem_task(txt):\n            async with sem:\n                return\
           \ await categorize_text(txt, executor)\n\n        tasks = [sem_task(txt)\
           \ for txt in texts]\n        return await asyncio.gather(*tasks)\n\n   \
-          \ # Run async classification\n    texts = df['text'].fillna('').tolist()\n\
-          \    categories = asyncio.run(categorize_all(texts))\n    df['category']\
-          \ = categories\n\n    try:\n        # Only stratify if every class has at\
-          \ least 2 samples\n        counts = df['category'].value_counts()\n    \
-          \    stratify = df['category'] if counts.min() >= 2 else None\n        train_df,\
-          \ val_df = train_test_split(\n            df,\n            test_size=0.2,\n\
-          \            random_state=42,\n            stratify=stratify\n        )\n\
-          \    except Exception as e:\n        print(f\"Stratified split failed: {e},\
-          \ falling back to random split.\")\n        train_df, val_df = train_test_split(\n\
-          \            df,\n            test_size=0.2,\n            random_state=42\n\
-          \        )\n\n    # Save CSVs\n    train_df.to_csv(train_data.path, index=False)\n\
-          \    val_df.to_csv(val_data.path, index=False)\n\n    # Upload to MinIO\n\
-          \    s3 = boto3.client(\n        's3',\n        endpoint_url=endpoint,\n\
-          \        aws_access_key_id=aws_access_key_id,\n        aws_secret_access_key=aws_secret_access_key\n\
+          \ texts = df['text'].fillna('').tolist()\n    categories = asyncio.run(categorize_all(texts))\n\
+          \    df['category'] = categories\n\n    try:\n        counts = df['category'].value_counts()\n\
+          \        stratify = df['category'] if counts.min() >= 2 else None\n    \
+          \    train_df, val_df = train_test_split(\n            df,\n           \
+          \ test_size=0.2,\n            random_state=42,\n            stratify=stratify\n\
+          \        )\n    except Exception as e:\n        print(f\"Stratified split\
+          \ failed: {e}, falling back to random split.\")\n        train_df, val_df\
+          \ = train_test_split(\n            df,\n            test_size=0.2,\n   \
+          \         random_state=42\n        )\n\n    train_df.to_csv(train_data.path,\
+          \ index=False)\n    val_df.to_csv(val_data.path, index=False)\n\n    s3\
+          \ = boto3.client(\n        's3',\n        endpoint_url=endpoint,\n     \
+          \   aws_access_key_id=aws_access_key_id,\n        aws_secret_access_key=aws_secret_access_key\n\
           \    )\n    s3.upload_file(train_data.path, 'mlops', 'data/train.csv')\n\
           \    s3.upload_file(val_data.path, 'mlops', 'data/val.csv')\n\n"
         image: python:3.10-slim
@@ -686,10 +657,9 @@ deploymentSpec:
 
           '
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
-          \ *\n\ndef reload_bentoml_model_op(bentoml_url: str):\n\n\n\n    import\
-          \ requests\n    resp = requests.post(f\"{bentoml_url}/reload_model\")\n\
-          \    print(\"Status:\", resp.status_code)\n    print(\"Body:\", resp.text)\n\
-          \n"
+          \ *\n\ndef reload_bentoml_model_op(bentoml_url: str):\n    import requests\n\
+          \    resp = requests.post(f\"{bentoml_url}/reload_model\")\n    print(\"\
+          Status:\", resp.status_code)\n    print(\"Body:\", resp.text)\n\n"
         image: python:3.10
     exec-train-op:
       container:
@@ -726,73 +696,67 @@ deploymentSpec:
           \    import json\n    from sklearn.metrics import accuracy_score, f1_score\n\
           \    from torch.serialization import add_safe_globals\n    from transformers.models.distilbert.modeling_distilbert\
           \ import (\n    DistilBertModel,\n    DistilBertForSequenceClassification,\n\
-          \    )   \n\n\n    # --- MLflow + MinIO setup ---\n    os.environ[\"MLFLOW_S3_ENDPOINT_URL\"\
-          ]    = endpoint\n    os.environ[\"AWS_ACCESS_KEY_ID\"]         = 'minioadmin'\n\
-          \    os.environ[\"AWS_SECRET_ACCESS_KEY\"]     = 'minioadmin123'\n    mlflow.set_tracking_uri(\"\
+          \    )   \n\n    os.environ[\"MLFLOW_S3_ENDPOINT_URL\"]    = endpoint\n\
+          \    os.environ[\"AWS_ACCESS_KEY_ID\"]         = 'minioadmin'\n    os.environ[\"\
+          AWS_SECRET_ACCESS_KEY\"]     = 'minioadmin123'\n    mlflow.set_tracking_uri(\"\
           http://mlflow.mlops.svc.cluster.local:5000\")\n    mlflow.set_experiment(\"\
-          news-classification\")\n\n    # --- (Re)upload CSVs to MinIO for provenance\
-          \ ---\n    s3 = boto3.client(\n        's3',\n        endpoint_url=endpoint,\n\
-          \        aws_access_key_id='minioadmin',\n        aws_secret_access_key='minioadmin123'\n\
-          \    )\n    s3.upload_file(train_data.path, 'mlops', 'data/train.csv')\n\
-          \    s3.upload_file(val_data.path,   'mlops', 'data/val.csv')\n\n    # ---\
-          \ Load dataframes ---\n    train_df = pd.read_csv(train_data.path)\n   \
-          \ val_df   = pd.read_csv(val_data.path)\n\n    # --- Build a shared label2id\
-          \ map over both splits ---\n    all_labels = pd.concat([train_df['category'],\
+          news-classification\")\n\n    s3 = boto3.client(\n        's3',\n      \
+          \  endpoint_url=endpoint,\n        aws_access_key_id='minioadmin',\n   \
+          \     aws_secret_access_key='minioadmin123'\n    )\n    s3.upload_file(train_data.path,\
+          \ 'mlops', 'data/train.csv')\n    s3.upload_file(val_data.path,   'mlops',\
+          \ 'data/val.csv')\n\n    train_df = pd.read_csv(train_data.path)\n    val_df\
+          \   = pd.read_csv(val_data.path)\n\n    all_labels = pd.concat([train_df['category'],\
           \ val_df['category']], ignore_index=True).unique()\n    label_list = sorted(all_labels)\n\
           \    label2id   = {lbl: i for i, lbl in enumerate(label_list)}\n    num_labels\
-          \ = len(label_list)\n\n    # --- Tokenizer & Model init ---\n    tokenizer\
-          \ = AutoTokenizer.from_pretrained('distilbert-base-uncased')\n    model\
-          \     = AutoModelForSequenceClassification.from_pretrained(\n        'distilbert-base-uncased',\n\
-          \        num_labels=num_labels\n    )\n\n    # --- Helpers to build loaders\
-          \ ---\n    def df_to_loader(df: pd.DataFrame, batch_size: int, shuffle:\
-          \ bool):\n        enc = tokenizer(\n            df['text'].tolist(),\n \
-          \           padding=True, truncation=True, return_tensors=\"pt\", max_length=512\n\
-          \        )\n        # map categories through the shared map\n        ids\
-          \ = df['category'].map(lambda c: label2id.get(c, -1)).astype(int).tolist()\n\
-          \        labels = torch.tensor(ids, dtype=torch.long)\n        ds = TensorDataset(enc['input_ids'],\
-          \ enc['attention_mask'], labels)\n        return DataLoader(ds, batch_size=batch_size,\
-          \ shuffle=shuffle)\n\n    train_loader = df_to_loader(train_df, batch_size=8,\
-          \ shuffle=True)\n    val_loader   = df_to_loader(val_df,   batch_size=16,\
-          \ shuffle=False)\n\n    optimizer = AdamW(model.parameters(), lr=2e-5)\n\
-          \n    # --- Evaluation helper ---\n    def evaluate(loader):\n        model.eval()\n\
-          \        preds, trues = [], []\n        with torch.no_grad():\n        \
-          \    for input_ids, attn_mask, labels in loader:\n                out =\
-          \ model(input_ids=input_ids, attention_mask=attn_mask)\n               \
-          \ batch_preds = torch.argmax(out.logits, dim=1).cpu().numpy()\n        \
-          \        preds.extend(batch_preds)\n                trues.extend(labels.cpu().numpy())\n\
+          \ = len(label_list)\n\n    tokenizer = AutoTokenizer.from_pretrained('distilbert-base-uncased')\n\
+          \    model     = AutoModelForSequenceClassification.from_pretrained(\n \
+          \       'distilbert-base-uncased',\n        num_labels=num_labels\n    )\n\
+          \n    def df_to_loader(df: pd.DataFrame, batch_size: int, shuffle: bool):\n\
+          \        enc = tokenizer(\n            df['text'].tolist(),\n          \
+          \  padding=True, truncation=True, return_tensors=\"pt\", max_length=512\n\
+          \        )\n\n        ids = df['category'].map(lambda c: label2id.get(c,\
+          \ -1)).astype(int).tolist()\n        labels = torch.tensor(ids, dtype=torch.long)\n\
+          \        ds = TensorDataset(enc['input_ids'], enc['attention_mask'], labels)\n\
+          \        return DataLoader(ds, batch_size=batch_size, shuffle=shuffle)\n\
+          \n    train_loader = df_to_loader(train_df, batch_size=8, shuffle=True)\n\
+          \    val_loader   = df_to_loader(val_df,   batch_size=16, shuffle=False)\n\
+          \n    optimizer = AdamW(model.parameters(), lr=2e-5)\n\n    def evaluate(loader):\n\
+          \        model.eval()\n        preds, trues = [], []\n        with torch.no_grad():\n\
+          \            for input_ids, attn_mask, labels in loader:\n             \
+          \   out = model(input_ids=input_ids, attention_mask=attn_mask)\n       \
+          \         batch_preds = torch.argmax(out.logits, dim=1).cpu().numpy()\n\
+          \                preds.extend(batch_preds)\n                trues.extend(labels.cpu().numpy())\n\
           \        return accuracy_score(trues, preds), f1_score(trues, preds, average='weighted')\n\
-          \n    # --- Training loop with MLflow logging ---\n    mlflow.start_run()\n\
-          \    mlflow.log_param(\"epochs\", epochs)\n\n    for epoch in range(epochs):\n\
-          \        model.train()\n        total_loss = 0.0\n        for input_ids,\
-          \ attn_mask, labels in train_loader:\n            out = model(input_ids=input_ids,\
-          \ attention_mask=attn_mask, labels=labels)\n            loss = out.loss\n\
-          \            optimizer.zero_grad()\n            loss.backward()\n      \
-          \      optimizer.step()\n            total_loss += loss.item()\n\n     \
-          \   avg_loss = total_loss / len(train_loader)\n        mlflow.log_metric(\"\
-          train_loss\", avg_loss, step=epoch)\n\n        tr_acc, tr_f1 = evaluate(train_loader)\n\
-          \        vl_acc, vl_f1 = evaluate(val_loader)\n        mlflow.log_metric(\"\
-          train_accuracy\", tr_acc, step=epoch)\n        mlflow.log_metric(\"train_f1\"\
-          ,       tr_f1, step=epoch)\n        mlflow.log_metric(\"val_accuracy\",\
-          \   vl_acc, step=epoch)\n        mlflow.log_metric(\"val_f1\",         vl_f1,\
-          \ step=epoch)\n\n    # final metrics\n    f_tr_acc, f_tr_f1 = evaluate(train_loader)\n\
+          \n    mlflow.start_run()\n    mlflow.log_param(\"epochs\", epochs)\n\n \
+          \   for epoch in range(epochs):\n        model.train()\n        total_loss\
+          \ = 0.0\n        for input_ids, attn_mask, labels in train_loader:\n   \
+          \         out = model(input_ids=input_ids, attention_mask=attn_mask, labels=labels)\n\
+          \            loss = out.loss\n            optimizer.zero_grad()\n      \
+          \      loss.backward()\n            optimizer.step()\n            total_loss\
+          \ += loss.item()\n\n        avg_loss = total_loss / len(train_loader)\n\
+          \        mlflow.log_metric(\"train_loss\", avg_loss, step=epoch)\n\n   \
+          \     tr_acc, tr_f1 = evaluate(train_loader)\n        vl_acc, vl_f1 = evaluate(val_loader)\n\
+          \        mlflow.log_metric(\"train_accuracy\", tr_acc, step=epoch)\n   \
+          \     mlflow.log_metric(\"train_f1\",       tr_f1, step=epoch)\n       \
+          \ mlflow.log_metric(\"val_accuracy\",   vl_acc, step=epoch)\n        mlflow.log_metric(\"\
+          val_f1\",         vl_f1, step=epoch)\n\n    f_tr_acc, f_tr_f1 = evaluate(train_loader)\n\
           \    f_val_acc, f_val_f1 = evaluate(val_loader)\n    mlflow.log_metric(\"\
           final_train_accuracy\", f_tr_acc)\n    mlflow.log_metric(\"final_train_f1\"\
           ,       f_tr_f1)\n    mlflow.log_metric(\"final_val_accuracy\",   f_val_acc)\n\
-          \    mlflow.log_metric(\"final_val_f1\",         f_val_f1)\n\n    # ---\
-          \ Save and log as PyFunc model ---\n    torch.save(model, \"model.pt\")\n\
-          \    with open('labels.json', 'w') as f:\n        json.dump(label_list,\
+          \    mlflow.log_metric(\"final_val_f1\",         f_val_f1)\n\n    torch.save(model,\
+          \ \"model.pt\")\n    with open('labels.json', 'w') as f:\n        json.dump(label_list,\
           \ f)\n    s3.upload_file('labels.json', 'mlops', 'data/labels.json')\n\n\
           \    class NewsClassifierWrapper(mlflow.pyfunc.PythonModel):\n        def\
           \ load_context(self, context):\n            import torch\n            from\
           \ transformers import AutoTokenizer\n            add_safe_globals([\n  \
           \              DistilBertModel,\n                DistilBertForSequenceClassification,\n\
-          \            ])\n            # self.model     = torch.load(context.artifacts[\"\
-          model_path\"])\n            self.model = torch.load(\n                context.artifacts[\"\
-          model_path\"],\n                weights_only=False\n            )\n    \
-          \        self.model.eval()\n            self.tokenizer = AutoTokenizer.from_pretrained('distilbert-base-uncased')\n\
-          \n\n        def predict(self, context, model_input):\n            import\
-          \ torch\n            texts = model_input[\"text\"].tolist()\n          \
-          \  toks = self.tokenizer(texts, padding=True, truncation=True, return_tensors=\"\
+          \            ])\n\n            self.model = torch.load(\n              \
+          \  context.artifacts[\"model_path\"],\n                weights_only=False\n\
+          \            )\n            self.model.eval()\n            self.tokenizer\
+          \ = AutoTokenizer.from_pretrained('distilbert-base-uncased')\n\n\n     \
+          \   def predict(self, context, model_input):\n            import torch\n\
+          \            texts = model_input[\"text\"].tolist()\n            toks =\
+          \ self.tokenizer(texts, padding=True, truncation=True, return_tensors=\"\
           pt\", max_length=512)\n            with torch.no_grad():\n             \
           \   out = self.model(**toks)\n                return torch.argmax(out.logits,\
           \ dim=1).cpu().numpy()\n\n    mlflow.pyfunc.log_model(\n        artifact_path=\"\
