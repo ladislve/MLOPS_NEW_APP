@@ -3,53 +3,100 @@ from kfp.dsl import Input, Output, Dataset
 from typing import Annotated
 
 @dsl.component(
-    base_image='python:3.10',
-    packages_to_install=['pandas', 'boto3', 'scikit-learn','kfp']
+    base_image='python:3.10-slim',
+    packages_to_install=[
+        'pandas',
+        'google-generativeai',
+        'boto3',
+        'scikit-learn'
+    ]
 )
 def preprocess_op(
-    raw_data: Annotated[Input[Dataset], "raw_data"],
+    merged_data: Annotated[Input[Dataset], "merged_data"],
+    endpoint: str,
+    api_key: str,
     train_data: Annotated[Output[Dataset], "train_data"],
     val_data: Annotated[Output[Dataset], "val_data"],
-    endpoint:str
+    aws_access_key_id: str = 'minioadmin',
+    aws_secret_access_key: str = 'minioadmin123',
 ):
-    import pandas as pd
-    import boto3
     import os
+    import pandas as pd
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    import google.generativeai as genai
     from sklearn.model_selection import train_test_split
-    
+    import boto3
+
+    os.environ['GOOGLE_API_KEY'] = api_key
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel('gemini-2.0-flash-lite')
+
+    df = pd.read_csv(merged_data.path)
+
+    def build_prompt(text: str) -> str:
+        return (
+            "You are an expert at analyzing news articles. Read the following article and assign it to a general category. "
+            "Don't use very specific or niche labels. The category should reflect the broad subject matter, such as "
+            "'Politics', 'Technology', 'Gaming', 'Health', 'Sports', 'Finance', 'Crime', etc.\n\n"
+            "Output ONLY the category name. Do NOT include explanations or anything else.\n\n"
+            f"Article:\n{text[:3000]}\n\nCategory:"
+        )
+
+    def categorize_sync(prompt: str) -> str:
+        try:
+            response = model.generate_content(prompt)
+            return response.text.strip().split('\n')[0]
+        except Exception as e:
+            print(f"Error during categorize_sync: {e}")
+            return 'Unknown'
+
+    async def categorize_text(text: str, executor: ThreadPoolExecutor):
+        loop = asyncio.get_event_loop()
+        prompt = build_prompt(text)
+        return await loop.run_in_executor(executor, categorize_sync, prompt)
+
+    async def categorize_all(texts):
+        MAX_CONCURRENT_TASKS = 5
+        executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_TASKS)
+        sem = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
+
+        async def sem_task(txt):
+            async with sem:
+                return await categorize_text(txt, executor)
+
+        tasks = [sem_task(txt) for txt in texts]
+        return await asyncio.gather(*tasks)
+
+    texts = df['text'].fillna('').tolist()
+    categories = asyncio.run(categorize_all(texts))
+    df['category'] = categories
+
+    try:
+        counts = df['category'].value_counts()
+        stratify = df['category'] if counts.min() >= 2 else None
+        train_df, val_df = train_test_split(
+            df,
+            test_size=0.2,
+            random_state=42,
+            stratify=stratify
+        )
+    except Exception as e:
+        print(f"Stratified split failed: {e}, falling back to random split.")
+        train_df, val_df = train_test_split(
+            df,
+            test_size=0.2,
+            random_state=42
+        )
+
+    train_df.to_csv(train_data.path, index=False)
+    val_df.to_csv(val_data.path, index=False)
+
     s3 = boto3.client(
         's3',
         endpoint_url=endpoint,
-        aws_access_key_id='minioadmin',
-        aws_secret_access_key='minioadmin123'
+        aws_access_key_id=aws_access_key_id,
+        aws_secret_access_key=aws_secret_access_key
     )
-
-    local_raw_file = 'news_raw.csv'
-    local_train_file = 'train.csv'
-    local_val_file = 'val.csv'
-
-    s3.download_file('mlops', 'data/news_raw.csv', local_raw_file)
-
-    df = pd.read_csv(local_raw_file)
-    df = df.dropna(subset=['title', 'description'])
-    df['text'] = df['title'] + ". " + df['description']
-
-    x_train, x_val, y_train, y_val = train_test_split(
-        df['text'], df['category'], test_size=0.2, random_state=42, stratify=df['category']
-    )
-
-    train_df = pd.DataFrame({'text': x_train, 'category': y_train})
-    val_df = pd.DataFrame({'text': x_val, 'category': y_val})
-
-    train_df.to_csv(train_data.path, index=False)  # KFP-managed path
-    val_df.to_csv(val_data.path, index=False)
-
-    # Upload for downstream persistence
     s3.upload_file(train_data.path, 'mlops', 'data/train.csv')
     s3.upload_file(val_data.path, 'mlops', 'data/val.csv')
-
-    for file in [local_raw_file]:
-        try:
-            os.remove(file)
-        except OSError as e:
-            print(f"Error removing file {file}: {e}")

@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bentoml-news
+  namespace: kubeflow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bentoml-news
+  template:
+    metadata:
+      labels:
+        app: bentoml-news
+    spec:
+      containers:
+      - name: bentoml
+        image: news_classifier:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 3000
+        env:
+        - name: BENTOML_HOME
+          value: /bentoml_storage
+        - name: MINIO_ENDPOINT
+          value: http://minio.mlops.svc.cluster.local:9000
+        - name: MINIO_ACCESS_KEY
+          value: minioadmin
+        - name: MINIO_SECRET_KEY
+          value: minioadmin123
+        - name: MINIO_BUCKET
+          value: mlops
+        - name: LABELS_OBJECT
+          value: data/labels.json
+        volumeMounts:
+        - name: bentoml-pvc
+          mountPath: /bentoml_storage
+      volumes:
+      - name: bentoml-pvc
+        persistentVolumeClaim:
+          claimName: bentoml-pvc

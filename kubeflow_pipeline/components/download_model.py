@@ -2,128 +2,108 @@ from kfp import dsl
 
 @dsl.component(
     base_image="python:3.10",
-    packages_to_install=["mlflow==2.13.0", "bentoml", "boto3", "kubernetes"]
+    packages_to_install=[
+        'transformers',
+        'torch',
+        "mlflow==2.13.0",
+        "bentoml",
+        "boto3",
+        "pandas",
+        "scikit-learn"
+    ]
 )
-def download_model_op(endpoint: str):
-    import os
+def download_model_op(endpoint: str) -> bool:
+    import os, time
+    import pandas as pd
     import mlflow
+    from mlflow.exceptions import MlflowException
+    from sklearn.metrics import f1_score
+    import boto3
     import bentoml
-    import requests
-    from kubernetes import client, config
 
-    # Load Kubernetes config
-    config.load_incluster_config()
-    apps_v1 = client.AppsV1Api()
-    core_v1 = client.CoreV1Api()
 
-    # --- MLflow model export ---
-    mlflow.set_tracking_uri("http://mlflow.mlops.svc.cluster.local:5000")
     os.environ["MLFLOW_S3_ENDPOINT_URL"] = endpoint
     os.environ["AWS_ACCESS_KEY_ID"] = "minioadmin"
     os.environ["AWS_SECRET_ACCESS_KEY"] = "minioadmin123"
+    mlflow.set_tracking_uri("http://mlflow.mlops.svc.cluster.local:5000")
+    os.environ["BENTOML_HOME"] = "/bentoml_storage"
+    client = mlflow.MlflowClient()
 
-    client_mlflow = mlflow.MlflowClient()
-    experiment = client_mlflow.get_experiment_by_name("news-classification")
-    runs = client_mlflow.search_runs(experiment.experiment_id, order_by=["start_time DESC"])
-    new_run = runs[0]
-    run_id = new_run.info.run_id
-    model_uri = f"runs:/{run_id}/model"
-
-    new_loss = new_run.data.metrics.get("train_loss", float("inf"))
-
-    # --- Get current model's loss ---
-    all_models = bentoml.models.list()
-    current_models = [m for m in all_models if m.tag.name == "news_classifier" and "mlflow_uri" in m.info.labels]
-    current_loss = float("inf")
-    for model in current_models:
-        try:
-            uri = model.info.labels["mlflow_uri"]
-            parts = uri.split("/")
-            run_id_candidate = parts[1] if len(parts) > 1 else ""
-            if run_id_candidate:
-                old_run = client_mlflow.get_run(run_id_candidate)
-                loss = old_run.data.metrics.get("train_loss", float("inf"))
-                if loss < current_loss:
-                    current_loss = loss
-        except Exception as e:
-            print(f"Warning: couldn't retrieve loss from label or run ID: {e}")
-
-    print(f"New model loss: {new_loss}, Current model loss: {current_loss}")
-    print("Found models:")
-    for model in current_models:
-        print(f"- Tag: {model.tag}, Label: {model.info.labels.get('mlflow_uri')}")
-
-
-    if new_loss >= current_loss:
-        print("New model did not improve. Skipping deployment.")
-        return
-
-    # --- Import model into BentoML ---
-    print(f"Importing model from {model_uri} into BentoML...")
-    bentoml.mlflow.import_model(
-        name="news_classifier",
-        model_uri=model_uri,
-        signatures={"predict": {"batchable": False}},
-        labels={"mlflow_uri": model_uri},
+    s3 = boto3.client(
+        "s3", endpoint_url=endpoint,
+        aws_access_key_id="minioadmin", aws_secret_access_key="minioadmin123"
     )
+    s3.download_file("mlops", "data/train.csv", "train.csv")
+    s3.download_file("mlops", "data/val.csv",   "val.csv")
 
-    # --- Determine current and next versions ---
+    train_df = pd.read_csv("train.csv")
+    val_df   = pd.read_csv("val.csv")
+
+    s3.download_file('mlops', 'data/labels.json', 'labels.json')
+    import json
+    with open('labels.json') as f:
+        label_list = json.load(f)
+    label2id = {lbl: i for i, lbl in enumerate(label_list)}
+
+    true_codes = val_df['category'].map(label2id).astype(int).tolist()
+
+    prod_f1 = -float("inf")
     try:
-        svc = core_v1.read_namespaced_service(name="news-classifier", namespace="mlops")
-        current_version = svc.spec.selector.get("version", "v1")
-    except:
-        current_version = "v1"
+        prod_pyfunc = mlflow.pyfunc.load_model("models:/news_classifier/Production")
+        prod_preds  = prod_pyfunc.predict(val_df)
+        prod_codes  = pd.Series(prod_preds).astype(int).tolist()
+        prod_f1     = f1_score(true_codes, prod_codes, average="weighted")
+    except MlflowException:
+        print("No existing Production model; setting prod_f1 = -inf")
+    print(f"Production model eval F1 = {prod_f1:.4f}")
 
-    next_version = "v2" if current_version == "v1" else "v1"
+    exp  = client.get_experiment_by_name("news-classification")
+    runs = client.search_runs(
+        experiment_ids=[exp.experiment_id],
+        order_by=["attributes.start_time DESC"],
+        max_results=1
+    )
+    if not runs:
+        raise RuntimeError("No runs found for 'news-classification'.")
+    challenger = runs[0]
+    run_id     = challenger.info.run_id
+    challenger_f1 = challenger.data.metrics.get("final_val_f1")
+    if challenger_f1 is None:
+        raise RuntimeError(f"Latest run {run_id} missing final_val_f1 metric.")
+    print(f"Challenger run {run_id} logged F1 = {challenger_f1:.4f}")
 
-    # --- Create new deployment ---
-    new_deployment = client.V1Deployment(
-        metadata=client.V1ObjectMeta(name=f"news-classifier-{next_version}", namespace="mlops"),
-        spec=client.V1DeploymentSpec(
-            replicas=1,
-            selector=client.V1LabelSelector(
-                match_labels={"app": "news-classifier", "version": next_version}
-            ),
-            template=client.V1PodTemplateSpec(
-                metadata=client.V1ObjectMeta(labels={"app": "news-classifier", "version": next_version}),
-                spec=client.V1PodSpec(containers=[
-                    client.V1Container(
-                        name="news-classifier",
-                        image="news_classification:latest",
-                        image_pull_policy="Never",
-                        ports=[client.V1ContainerPort(container_port=3000)]
-                    )
-                ])
-            )
+    should_reload = False
+    if challenger_f1 > prod_f1:
+        print("Promoting new model to Production.")
+        reg = mlflow.register_model(model_uri=f"runs:/{run_id}/model", name="news_classifier")
+        version = reg.version
+        for _ in range(20):
+            mv = client.get_model_version("news_classifier", version)
+            if mv.status == "READY":
+                break
+            time.sleep(1)
+        client.transition_model_version_stage(
+            name="news_classifier",
+            version=version,
+            stage="Production",
+            archive_existing_versions=True
         )
-    )
+        bentoml.mlflow.import_model(
+            name="news_classifier",
+            model_uri=f"runs:/{run_id}/model",
+            signatures={"predict": {"batchable": False}},
+            labels={
+                "mlflow_run_id": run_id,
+                "final_val_f1": f"{challenger_f1:.4f}",
+                "mlflow_version": str(version)
+            }
+        )
+        should_reload = True
+    else:
+        print("No promotion needed; Production remains best or equal.")
 
-    try:
-        apps_v1.create_namespaced_deployment(namespace="mlops", body=new_deployment)
-    except client.exceptions.ApiException as e:
-        if e.status == 409:
-            apps_v1.replace_namespaced_deployment(name=f"news-classifier-{next_version}", namespace="mlops", body=new_deployment)
-        else:
-            raise
 
-    # --- Wait for new pod to be ready ---
-    import time
-    while True:
-        pods = core_v1.list_namespaced_pod(namespace="mlops", label_selector=f"version={next_version},app=news-classifier")
-        if all(p.status.phase == "Running" and all(c.ready for c in p.status.container_statuses) for p in pods.items):
-            break
-        time.sleep(2)
 
-    # --- Patch service to point to new version ---
-    svc.spec.selector["version"] = next_version
-    core_v1.patch_namespaced_service(name="news-classifier", namespace="mlops", body=svc)
 
-    print(f"Deployment switched to version {next_version}.")
+    return should_reload
 
-    # --- Delete old deployment ---
-    old_deployment_name = f"news-classifier-{current_version}"
-    try:
-        apps_v1.delete_namespaced_deployment(name=old_deployment_name, namespace="mlops")
-        print(f"Old deployment {old_deployment_name} deleted.")
-    except client.exceptions.ApiException as e:
-        print(f"Warning: could not delete old deployment {old_deployment_name}: {e}")

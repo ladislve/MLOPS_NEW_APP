@@ -2,51 +2,53 @@ import kfp
 from dotenv import load_dotenv
 load_dotenv()
 import os
-client = kfp.Client(host="http://localhost:3000")
+client = kfp.Client(host="http://localhost:3000",)
 
-# Create a run directly from the pipeline YAML
 run = client.create_run_from_pipeline_package(
     pipeline_file="news_pipeline.yaml",
+    enable_caching=True,
     arguments={'news_api_key': os.getenv('NEWS_API_KEY'),
-               'endpoint': os.getenv('MINIO_ENDPOINT_KUBEFLOW'),},  # If your pipeline accepts parameters, put them here
-    run_name="news-classification-run"
+               'endpoint': os.getenv('MINIO_ENDPOINT_KUBEFLOW'),
+               'gnews_api_key': 'f42ffa7ab425651b1448413afecf998c',
+               'mediastack_access_key': 'b6a6d8cbba9c5c17bac94b4a4058a97d',
+               'newsapi_api_key': os.getenv('NEWS_API_KEY'),
+               'gemini_api_key': 'AIzaSyDdoIR2Tnflbe8F33ZwW-gBz95wqr3tPKY'}, 
 )
 
-# import os
-# import requests
-# import pandas as pd
-# import boto3
+# kubectl -n kubeflow create secret generic pipeline-trigger-secrets \
+#   --from-literal=NEWS_API_KEY=a602b247767b40b79a579298b21c2fe9 \
+#   --from-literal=MINIO_ENDPOINT_KUBEFLOW=http://minio.mlops.svc.cluster.local:9000 \
+#   --from-literal=GEMINI_API_KEY=AIzaSyDdoIR2Tnflbe8F33ZwW-gBz95wqr3tPKY \
+#   --from-literal=MEDIASTACK_ACCESS_KEY=b6a6d8cbba9c5c17bac94b4a4058a97d \
+#   --from-literal=NEWSAPI_API_KEY=a602b247767b40b79a579298b21c2fe9 \
+#   --from-literal=GNEWS_API_KEY=f42ffa7ab425651b1448413afecf998c \
+#   --from-literal=KFP_HOST=http://ml-pipeline.kubeflow.svc.cluster.local:8888
+
+
+
+# import kfp
 # from dotenv import load_dotenv
-
 # load_dotenv()
-# NEWS_API_KEY = os.getenv('NEWS_API_KEY')
+# import os
 
-# categories = ['business', 'sports', 'technology']
-# articles = []
+# client = kfp.Client(host="http://localhost:3000")
 
-# for category in categories:
-#     url = f'https://newsapi.org/v2/top-headlines?category={category}&apiKey={NEWS_API_KEY}&pageSize=50'
-#     resp = requests.get(url)
-    
-#     data = resp.json()
-#     print(data)
-#     for article in data['articles']:
-#         articles.append({
-#             'title': article['title'],
-#             'description': article['description'],
-#             'category': category
-#         })
+# experiment = client.create_experiment(name="News Classification")
+# experiment_id = experiment.experiment_id
 
-# df = pd.DataFrame(articles)
-# df.to_csv('raw_data.csv', index=False)
-# endpoint = os.getenv('MINIO_ENDPOINT_LOCAL')
-# if os.getenv('KUBEFLOW_RUN') == 'true':
-#     endpoint = os.getenv('MINIO_ENDPOINT_KUBEFLOW')
+# cron_expression = "*/8 * * * *"
 
-# s3 = boto3.client(
-#     's3',
-#     endpoint_url=endpoint,
-#     aws_access_key_id='minioadmin',
-#     aws_secret_access_key='minioadmin123'
+# recurring_run = client.create_recurring_run(
+#     experiment_id=experiment_id,
+#     job_name="news-classification-scheduled",
+#     description="Run news classification pipeline every hour",
+#     pipeline_package_path="news_pipeline.yaml",
+#     params={
+#         'news_api_key': os.getenv('NEWS_API_KEY'),
+#         'endpoint': os.getenv('MINIO_ENDPOINT_KUBEFLOW'),
+#     },
+#     max_concurrency=1,
+#     no_catchup=True,
+#     cron_expression=cron_expression,
+#     enable_caching=False
 # )
-# s3.upload_file('raw_data.csv', 'mlops', 'data/news_raw.csv')

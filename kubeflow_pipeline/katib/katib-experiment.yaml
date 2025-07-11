@@ -1,0 +1,63 @@
+apiVersion: kubeflow.org/v1beta1
+kind: Experiment
+metadata:
+  name: news-classifier-tuning
+  namespace: kubeflow
+spec:
+  objective:
+    type: maximize
+    goal: 0.5
+    objectiveMetricName: final_val_accuracy
+  algorithm:
+    algorithmName: random
+  parallelTrialCount: 2
+  maxTrialCount: 10
+  maxFailedTrialCount: 3
+  parameters:
+    - name: learning_rate
+      parameterType: double
+      feasibleSpace:
+        min: "1e-5"
+        max: "5e-5"
+    - name: batch_size
+      parameterType: int
+      feasibleSpace:
+        min: "8"
+        max: "32"
+  metricsCollectorSpec:
+    collector:
+      kind: StdOut
+    metricsFormat:
+      - name: final_val_accuracy
+        regex: 'final_val_accuracy=([0-9]+\.?[0-9]*)'
+      - name: final_val_f1
+        regex: 'final_val_f1=([0-9]+\.?[0-9]*)'
+  trialTemplate:
+    primaryContainerName: training-container
+    trialParameters:
+      - name: learning_rate
+        reference: learning_rate
+        description: Learning rate
+      - name: batch_size
+        reference: batch_size
+        description: Batch size
+    trialSpec:
+      apiVersion: batch/v1
+      kind: Job
+      spec:
+        template:
+          spec:
+            containers:
+              - name: training-container
+                image: train-component:latest
+                imagePullPolicy: Never
+                command: ["python", "/train.py"]
+                args:
+                  - "--learning_rate=${trialParameters.learning_rate}"
+                  - "--batch_size=${trialParameters.batch_size}"
+                  - "--epochs=2"
+                  - "--endpoint=http://minio.mlops.svc.cluster.local:9000"
+            restartPolicy: Never
+    successCondition: status.succeeded >= 1
+    failureCondition: status.failed >= 1
+

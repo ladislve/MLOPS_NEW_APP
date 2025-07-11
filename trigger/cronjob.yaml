@@ -1,0 +1,19 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pipeline-trigger
+  namespace: kubeflow
+spec:
+  schedule: "*/10 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: trigger-pipeline
+            image: trigger-pipeline:latest
+            imagePullPolicy: Never
+            envFrom:
+            - secretRef:
+                name: pipeline-trigger-secrets
+          restartPolicy: OnFailure
