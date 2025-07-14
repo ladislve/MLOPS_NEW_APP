@@ -17,8 +17,8 @@ def preprocess_op(
     api_key: str,
     train_data: Annotated[Output[Dataset], "train_data"],
     val_data: Annotated[Output[Dataset], "val_data"],
-    aws_access_key_id: str = 'minioadmin',
-    aws_secret_access_key: str = 'minioadmin123',
+    aws_access_key_id: str,
+    aws_secret_access_key: str,
 ):
     import os
     import pandas as pd

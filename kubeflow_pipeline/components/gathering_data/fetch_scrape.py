@@ -14,8 +14,8 @@ from typing import Annotated
 def fetch_scrape_op(
     raw_data: Annotated[Output[Dataset], "raw_data"],
     endpoint: str,
-    aws_access_key_id: str = 'minioadmin',
-    aws_secret_access_key: str = 'minioadmin123',
+    aws_access_key_id: str,
+    aws_secret_access_key: str,
     max_workers: int = 5
 ):
     import requests
@@ -92,7 +92,7 @@ def fetch_scrape_op(
                     break
             arts = []
             with ThreadPoolExecutor(max_workers=self.max_workers) as exec:
-                futs = {exec.submit(self.extract_article, u): u for u in list(links)[:7]}
+                futs = {exec.submit(self.extract_article, u): u for u in list(links)[:70]}
                 for fut in as_completed(futs):
                     u = futs[fut]
                     try:

@@ -12,7 +12,10 @@ from kfp import dsl
         "scikit-learn"
     ]
 )
-def download_model_op(endpoint: str) -> bool:
+def download_model_op(endpoint: str,
+                      aws_access_key_id:str,
+                      aws_secret_access_key:str,
+                      mlflow_s3_endpoint_url:str) -> bool:
     import os, time
     import pandas as pd
     import mlflow
@@ -23,15 +26,15 @@ def download_model_op(endpoint: str) -> bool:
 
 
     os.environ["MLFLOW_S3_ENDPOINT_URL"] = endpoint
-    os.environ["AWS_ACCESS_KEY_ID"] = "minioadmin"
-    os.environ["AWS_SECRET_ACCESS_KEY"] = "minioadmin123"
+    os.environ["AWS_ACCESS_KEY_ID"] = aws_access_key_id
+    os.environ["AWS_SECRET_ACCESS_KEY"] = aws_secret_access_key
     mlflow.set_tracking_uri("http://mlflow.mlops.svc.cluster.local:5000")
     os.environ["BENTOML_HOME"] = "/bentoml_storage"
     client = mlflow.MlflowClient()
 
     s3 = boto3.client(
         "s3", endpoint_url=endpoint,
-        aws_access_key_id="minioadmin", aws_secret_access_key="minioadmin123"
+        aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key
     )
     s3.download_file("mlops", "data/train.csv", "train.csv")
     s3.download_file("mlops", "data/val.csv",   "val.csv")

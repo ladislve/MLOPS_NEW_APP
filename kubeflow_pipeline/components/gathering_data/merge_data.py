@@ -12,8 +12,8 @@ def merge_data_op(
     api_data: Annotated[Input[Dataset], "api_data"],
     merged_data: Annotated[Output[Dataset], "merged_data"],
     endpoint: str,
-    aws_access_key_id: str = 'minioadmin',
-    aws_secret_access_key: str = 'minioadmin123'
+    aws_access_key_id: str,
+    aws_secret_access_key: str
 ):
     import pandas as pd
     import boto3

@@ -2,21 +2,24 @@ import kfp
 from dotenv import load_dotenv
 import os
 
-# Load environment variables
 load_dotenv()
 
 client = kfp.Client(host="http://localhost:3000")
 
 run = client.create_run_from_pipeline_package(
     pipeline_file="news_pipeline.yaml",
-    enable_caching=True,
+    enable_caching=False,
     arguments={
         'news_api_key': os.getenv('NEWS_API_KEY'),
         'endpoint': os.getenv('MINIO_ENDPOINT_KUBEFLOW'),
         'gnews_api_key': os.getenv('GNEWS_API_KEY'),
         'mediastack_access_key': os.getenv('MEDIASTACK_ACCESS_KEY'),
         'newsapi_api_key': os.getenv('NEWS_API_KEY'),
-        'gemini_api_key': os.getenv('GEMINI_API_KEY')
+        'gemini_api_key': os.getenv('GEMINI_API_KEY'),
+        'aws_access_key_id': os.getenv('AWS_ACCESS_KEY_ID'),
+        'aws_secret_access_key': os.getenv('AWS_SECRET_ACCESS_KEY'),
+        'mlflow_s3_endpoint_url': os.getenv('MLFLOW_S3_ENDPOINT_URL'),
+        'bentoml_news_url': os.getenv('BENTOML_NEWS_URL')
     }
 )
 

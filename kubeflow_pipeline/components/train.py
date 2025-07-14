@@ -12,6 +12,9 @@ def train_op(
     train_data: Annotated[Input[Dataset], "train_data"],
     val_data:   Annotated[Input[Dataset], "val_data"],
     endpoint: str,
+    aws_access_key_id: str,
+    aws_secret_access_key:str,
+    mlflow_s3_endpoint_url:str,
     epochs:    int = 1
 ):
     import os
@@ -31,8 +34,8 @@ def train_op(
     )   
 
     os.environ["MLFLOW_S3_ENDPOINT_URL"]    = endpoint
-    os.environ["AWS_ACCESS_KEY_ID"]         = 'minioadmin'
-    os.environ["AWS_SECRET_ACCESS_KEY"]     = 'minioadmin123'
+    os.environ["AWS_ACCESS_KEY_ID"]         = aws_access_key_id
+    os.environ["AWS_SECRET_ACCESS_KEY"]     = aws_secret_access_key
     mlflow.set_tracking_uri("http://mlflow.mlops.svc.cluster.local:5000")
     mlflow.set_experiment("news-classification")
 
@@ -130,7 +133,7 @@ def train_op(
                 DistilBertModel,
                 DistilBertForSequenceClassification,
             ])
-            
+
             self.model = torch.load(
                 context.artifacts["model_path"],
                 weights_only=False

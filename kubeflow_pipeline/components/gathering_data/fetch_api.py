@@ -18,8 +18,8 @@ def fetch_api_op(
     gnews_api_key: str,
     mediastack_access_key: str,
     newsapi_api_key: str,
-    aws_access_key_id: str = 'minioadmin',
-    aws_secret_access_key: str = 'minioadmin123'
+    aws_access_key_id: str ,
+    aws_secret_access_key: str
 ):
     import requests
     import pandas as pd
@@ -37,7 +37,7 @@ def fetch_api_op(
             return ""
 
     def fetch_gnews_articles():
-        url = f"https://gnews.io/api/v4/search?q=world&lang=en&max=7&token={gnews_api_key}"
+        url = f"https://gnews.io/api/v4/search?q=world&lang=en&max=50&token={gnews_api_key}"
         resp = requests.get(url)
         data = resp.json()
         arts = []
@@ -56,7 +56,7 @@ def fetch_api_op(
         return arts
 
     def fetch_mediastack_articles():
-        url = f"http://api.mediastack.com/v1/news?access_key={mediastack_access_key}&languages=en&limit=7"
+        url = f"http://api.mediastack.com/v1/news?access_key={mediastack_access_key}&languages=en&limit=70"
         resp = requests.get(url)
         data = resp.json()
         arts = []
@@ -79,7 +79,7 @@ def fetch_api_op(
         resp = requests.get(url)
         data = resp.json()
         arts = []
-        for item in data.get("items", [])[:7]:
+        for item in data.get("items", [])[:70]:
             title = item.get("title", "").strip()
             link = item.get("url", "").strip()
             text = scrape_article_text(link)
@@ -97,7 +97,7 @@ def fetch_api_op(
         cats = ['business', 'technology', 'science', 'health', 'general']
         arts = []
         for cat in cats:
-            url = f'https://newsapi.org/v2/top-headlines?category={cat}&language=en&pageSize=7&apiKey={newsapi_api_key}'
+            url = f'https://newsapi.org/v2/top-headlines?category={cat}&language=en&pageSize=30&apiKey={newsapi_api_key}'
             resp = requests.get(url)
             data = resp.json()
             for item in data.get("articles", []):

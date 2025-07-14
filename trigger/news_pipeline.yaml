@@ -1,12 +1,3 @@
-# PIPELINE DEFINITION
-# Name: news-classification-full
-# Inputs:
-#    endpoint: str
-#    gemini_api_key: str
-#    gnews_api_key: str
-#    mediastack_access_key: str
-#    news_api_key: str
-#    newsapi_api_key: str
 components:
   comp-condition-1:
     dag:

@@ -1,10 +1,14 @@
 # PIPELINE DEFINITION
 # Name: news-classification-full
 # Inputs:
+#    aws_access_key_id: str
+#    aws_secret_access_key: str
+#    bentoml_news_url: str
 #    endpoint: str
 #    gemini_api_key: str
 #    gnews_api_key: str
 #    mediastack_access_key: str
+#    mlflow_s3_endpoint_url: str
 #    news_api_key: str
 #    newsapi_api_key: str
 components:
@@ -19,19 +23,26 @@ components:
           inputs:
             parameters:
               bentoml_url:
-                runtimeValue:
-                  constant: http://bentoml-news.kubeflow.svc.cluster.local:3000
+                componentInputParameter: pipelinechannel--bentoml_news_url
           taskInfo:
             name: reload-bentoml-model-op
     inputDefinitions:
       parameters:
+        pipelinechannel--bentoml_news_url:
+          parameterType: STRING
         pipelinechannel--download-model-op-Output:
           parameterType: BOOLEAN
   comp-download-model-op:
     executorLabel: exec-download-model-op
     inputDefinitions:
       parameters:
+        aws_access_key_id:
+          parameterType: STRING
+        aws_secret_access_key:
+          parameterType: STRING
         endpoint:
+          parameterType: STRING
+        mlflow_s3_endpoint_url:
           parameterType: STRING
     outputDefinitions:
       parameters:
@@ -42,12 +53,8 @@ components:
     inputDefinitions:
       parameters:
         aws_access_key_id:
-          defaultValue: minioadmin
-          isOptional: true
           parameterType: STRING
         aws_secret_access_key:
-          defaultValue: minioadmin123
-          isOptional: true
           parameterType: STRING
         endpoint:
           parameterType: STRING
@@ -68,12 +75,8 @@ components:
     inputDefinitions:
       parameters:
         aws_access_key_id:
-          defaultValue: minioadmin
-          isOptional: true
           parameterType: STRING
         aws_secret_access_key:
-          defaultValue: minioadmin123
-          isOptional: true
           parameterType: STRING
         endpoint:
           parameterType: STRING
@@ -88,12 +91,8 @@ components:
     inputDefinitions:
       parameters:
         aws_access_key_id:
-          defaultValue: minioadmin
-          isOptional: true
           parameterType: STRING
         aws_secret_access_key:
-          defaultValue: minioadmin123
-          isOptional: true
           parameterType: STRING
         endpoint:
           parameterType: STRING
@@ -125,12 +124,8 @@ components:
             schemaVersion: 0.0.1
       parameters:
         aws_access_key_id:
-          defaultValue: minioadmin
-          isOptional: true
           parameterType: STRING
         aws_secret_access_key:
-          defaultValue: minioadmin123
-          isOptional: true
           parameterType: STRING
         endpoint:
           parameterType: STRING
@@ -152,12 +147,8 @@ components:
         api_key:
           parameterType: STRING
         aws_access_key_id:
-          defaultValue: minioadmin
-          isOptional: true
           parameterType: STRING
         aws_secret_access_key:
-          defaultValue: minioadmin123
-          isOptional: true
           parameterType: STRING
         endpoint:
           parameterType: STRING
@@ -190,12 +181,18 @@ components:
             schemaTitle: system.Dataset
             schemaVersion: 0.0.1
       parameters:
+        aws_access_key_id:
+          parameterType: STRING
+        aws_secret_access_key:
+          parameterType: STRING
         endpoint:
           parameterType: STRING
         epochs:
           defaultValue: 1.0
           isOptional: true
           parameterType: NUMBER_INTEGER
+        mlflow_s3_endpoint_url:
+          parameterType: STRING
 deploymentSpec:
   executors:
     exec-download-model-op:
@@ -226,16 +223,18 @@ deploymentSpec:
 
           '
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
-          \ *\n\ndef download_model_op(endpoint: str) -> bool:\n    import os, time\n\
-          \    import pandas as pd\n    import mlflow\n    from mlflow.exceptions\
-          \ import MlflowException\n    from sklearn.metrics import f1_score\n   \
-          \ import boto3\n    import bentoml\n\n\n    os.environ[\"MLFLOW_S3_ENDPOINT_URL\"\
-          ] = endpoint\n    os.environ[\"AWS_ACCESS_KEY_ID\"] = \"minioadmin\"\n \
-          \   os.environ[\"AWS_SECRET_ACCESS_KEY\"] = \"minioadmin123\"\n    mlflow.set_tracking_uri(\"\
+          \ *\n\ndef download_model_op(endpoint: str,\n                      aws_access_key_id:str,\n\
+          \                      aws_secret_access_key:str,\n                    \
+          \  mlflow_s3_endpoint_url:str) -> bool:\n    import os, time\n    import\
+          \ pandas as pd\n    import mlflow\n    from mlflow.exceptions import MlflowException\n\
+          \    from sklearn.metrics import f1_score\n    import boto3\n    import\
+          \ bentoml\n\n\n    os.environ[\"MLFLOW_S3_ENDPOINT_URL\"] = endpoint\n \
+          \   os.environ[\"AWS_ACCESS_KEY_ID\"] = aws_access_key_id\n    os.environ[\"\
+          AWS_SECRET_ACCESS_KEY\"] = aws_secret_access_key\n    mlflow.set_tracking_uri(\"\
           http://mlflow.mlops.svc.cluster.local:5000\")\n    os.environ[\"BENTOML_HOME\"\
           ] = \"/bentoml_storage\"\n    client = mlflow.MlflowClient()\n\n    s3 =\
-          \ boto3.client(\n        \"s3\", endpoint_url=endpoint,\n        aws_access_key_id=\"\
-          minioadmin\", aws_secret_access_key=\"minioadmin123\"\n    )\n    s3.download_file(\"\
+          \ boto3.client(\n        \"s3\", endpoint_url=endpoint,\n        aws_access_key_id=aws_access_key_id,\
+          \ aws_secret_access_key=aws_secret_access_key\n    )\n    s3.download_file(\"\
           mlops\", \"data/train.csv\", \"train.csv\")\n    s3.download_file(\"mlops\"\
           , \"data/val.csv\",   \"val.csv\")\n\n    train_df = pd.read_csv(\"train.csv\"\
           )\n    val_df   = pd.read_csv(\"val.csv\")\n\n    s3.download_file('mlops',\
@@ -303,14 +302,13 @@ deploymentSpec:
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
           \ *\n\ndef fetch_api_op(\n    raw_data: Annotated[Output[Dataset], \"raw_data\"\
           ],\n    endpoint: str,\n    gnews_api_key: str,\n    mediastack_access_key:\
-          \ str,\n    newsapi_api_key: str,\n    aws_access_key_id: str = 'minioadmin',\n\
-          \    aws_secret_access_key: str = 'minioadmin123'\n):\n    import requests\n\
-          \    import pandas as pd\n    import time\n    from newspaper import Article\n\
-          \    import boto3\n\n    def scrape_article_text(url):\n        try:\n \
-          \           art = Article(url)\n            art.download()\n           \
-          \ art.parse()\n            return art.text[:500]\n        except:\n    \
-          \        return \"\"\n\n    def fetch_gnews_articles():\n        url = f\"\
-          https://gnews.io/api/v4/search?q=world&lang=en&max=7&token={gnews_api_key}\"\
+          \ str,\n    newsapi_api_key: str,\n    aws_access_key_id: str ,\n    aws_secret_access_key:\
+          \ str\n):\n    import requests\n    import pandas as pd\n    import time\n\
+          \    from newspaper import Article\n    import boto3\n\n    def scrape_article_text(url):\n\
+          \        try:\n            art = Article(url)\n            art.download()\n\
+          \            art.parse()\n            return art.text[:500]\n        except:\n\
+          \            return \"\"\n\n    def fetch_gnews_articles():\n        url\
+          \ = f\"https://gnews.io/api/v4/search?q=world&lang=en&max=50&token={gnews_api_key}\"\
           \n        resp = requests.get(url)\n        data = resp.json()\n       \
           \ arts = []\n        for item in data.get(\"articles\", []):\n         \
           \   title = item.get(\"title\", \"\").strip()\n            link = item.get(\"\
@@ -319,7 +317,7 @@ deploymentSpec:
           \          \"source\": \"GNews\",\n                    \"title\": title,\n\
           \                    \"text\": text,\n                    \"link\": link\n\
           \                })\n            time.sleep(0.05)\n        return arts\n\
-          \n    def fetch_mediastack_articles():\n        url = f\"http://api.mediastack.com/v1/news?access_key={mediastack_access_key}&languages=en&limit=7\"\
+          \n    def fetch_mediastack_articles():\n        url = f\"http://api.mediastack.com/v1/news?access_key={mediastack_access_key}&languages=en&limit=70\"\
           \n        resp = requests.get(url)\n        data = resp.json()\n       \
           \ arts = []\n        for item in data.get(\"data\", []):\n            title\
           \ = item.get(\"title\", \"\").strip()\n            link = item.get(\"url\"\
@@ -330,8 +328,8 @@ deploymentSpec:
           \                })\n            time.sleep(0.05)\n        return arts\n\
           \n    def fetch_hn_rssapi():\n        url = \"https://hnrss.org/frontpage.jsonfeed\"\
           \n        resp = requests.get(url)\n        data = resp.json()\n       \
-          \ arts = []\n        for item in data.get(\"items\", [])[:7]:\n        \
-          \    title = item.get(\"title\", \"\").strip()\n            link = item.get(\"\
+          \ arts = []\n        for item in data.get(\"items\", [])[:70]:\n       \
+          \     title = item.get(\"title\", \"\").strip()\n            link = item.get(\"\
           url\", \"\").strip()\n            text = scrape_article_text(link)\n   \
           \         if title and text:\n                arts.append({\n          \
           \          \"source\": \"HackerNews\",\n                    \"title\": title,\n\
@@ -339,7 +337,7 @@ deploymentSpec:
           \                })\n            time.sleep(0.05)\n        return arts\n\
           \n    def fetch_newsapi_articles():\n        cats = ['business', 'technology',\
           \ 'science', 'health', 'general']\n        arts = []\n        for cat in\
-          \ cats:\n            url = f'https://newsapi.org/v2/top-headlines?category={cat}&language=en&pageSize=7&apiKey={newsapi_api_key}'\n\
+          \ cats:\n            url = f'https://newsapi.org/v2/top-headlines?category={cat}&language=en&pageSize=30&apiKey={newsapi_api_key}'\n\
           \            resp = requests.get(url)\n            data = resp.json()\n\
           \            for item in data.get(\"articles\", []):\n                title\
           \ = item.get(\"title\", \"\").strip()\n                link = item.get(\"\
@@ -385,20 +383,19 @@ deploymentSpec:
           '
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
           \ *\n\ndef fetch_rss_op(\n    raw_data: Annotated[Output[Dataset], \"raw_data\"\
-          ],\n    endpoint: str,\n    aws_access_key_id: str = 'minioadmin',\n   \
-          \ aws_secret_access_key: str = 'minioadmin123'\n):\n    import feedparser\n\
-          \    from newspaper import Article\n    import pandas as pd\n    import\
-          \ time\n    import boto3\n\n    rss_list = [\n        'https://feeds.bbci.co.uk/news/world/rss.xml',\n\
-          \        'https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en',\n    \
-          \    'https://www.yahoo.com/news/rss',\n        'https://www.theguardian.com/world/rss',\n\
+          ],\n    endpoint: str,\n    aws_access_key_id: str,\n    aws_secret_access_key:\
+          \ str\n):\n    import feedparser\n    from newspaper import Article\n  \
+          \  import pandas as pd\n    import time\n    import boto3\n\n    rss_list\
+          \ = [\n        'https://feeds.bbci.co.uk/news/world/rss.xml',\n        'https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en',\n\
+          \        'https://www.yahoo.com/news/rss',\n        'https://www.theguardian.com/world/rss',\n\
           \        'https://www.reddit.com/r/science/.rss',\n        'https://www.theguardian.com/science/space/rss',\n\
           \        'https://feeds.bbci.co.uk/sport/rss.xml',\n        'https://hnrss.org/frontpage',\n\
           \        'https://feeds.megaphone.fm/vergecast',\n        'https://feeds.feedburner.com/speedhunters',\n\
           \        'https://medium.com/feed/hackernoon',\n        'https://www.reddit.com/r/programming/.rss'\n\
           \    ]\n\n    records = []\n\n    for url in rss_list:\n        feed = feedparser.parse(url)\n\
           \        if feed.bozo:\n            print(f\"Failed to parse: {url}\")\n\
-          \            continue\n\n        for entry in feed.entries[:7]:\n      \
-          \      link  = entry.get('link', '').strip()\n            title = entry.get('title',\
+          \            continue\n\n        for entry in feed.entries[:70]:\n     \
+          \       link  = entry.get('link', '').strip()\n            title = entry.get('title',\
           \ '').strip()\n            try:\n                article = Article(link)\n\
           \                article.download()\n                article.parse()\n \
           \               text_snippet = article.text[:200]\n                if title\
@@ -440,16 +437,15 @@ deploymentSpec:
           '
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
           \ *\n\ndef fetch_scrape_op(\n    raw_data: Annotated[Output[Dataset], \"\
-          raw_data\"],\n    endpoint: str,\n    aws_access_key_id: str = 'minioadmin',\n\
-          \    aws_secret_access_key: str = 'minioadmin123',\n    max_workers: int\
-          \ = 5\n):\n    import requests\n    from bs4 import BeautifulSoup\n    import\
-          \ pandas as pd\n    import time\n    from urllib.parse import urljoin\n\
-          \    from concurrent.futures import ThreadPoolExecutor, as_completed\n \
-          \   import boto3\n\n    class FastNewsScraper:\n        def __init__(self,\
-          \ max_workers=5):\n            self.session = requests.Session()\n     \
-          \       self.session.headers.update({\n                'User-Agent': 'Mozilla/5.0\
-          \ (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'\n            })\n  \
-          \          self.max_workers = max_workers\n\n        def get_page(self,\
+          raw_data\"],\n    endpoint: str,\n    aws_access_key_id: str,\n    aws_secret_access_key:\
+          \ str,\n    max_workers: int = 5\n):\n    import requests\n    from bs4\
+          \ import BeautifulSoup\n    import pandas as pd\n    import time\n    from\
+          \ urllib.parse import urljoin\n    from concurrent.futures import ThreadPoolExecutor,\
+          \ as_completed\n    import boto3\n\n    class FastNewsScraper:\n       \
+          \ def __init__(self, max_workers=5):\n            self.session = requests.Session()\n\
+          \            self.session.headers.update({\n                'User-Agent':\
+          \ 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'\n     \
+          \       })\n            self.max_workers = max_workers\n\n        def get_page(self,\
           \ url, timeout=5):\n            try:\n                resp = self.session.get(url,\
           \ timeout=timeout)\n                return BeautifulSoup(resp.content, 'html.parser')\n\
           \            except:\n                return None\n\n        def extract_text_fast(self,\
@@ -479,7 +475,7 @@ deploymentSpec:
           \                            links.add(full)\n                if len(links)\
           \ >= 7:\n                    break\n            arts = []\n            with\
           \ ThreadPoolExecutor(max_workers=self.max_workers) as exec:\n          \
-          \      futs = {exec.submit(self.extract_article, u): u for u in list(links)[:7]}\n\
+          \      futs = {exec.submit(self.extract_article, u): u for u in list(links)[:70]}\n\
           \                for fut in as_completed(futs):\n                    u =\
           \ futs[fut]\n                    try:\n                        t, txt =\
           \ fut.result()\n                        if t and txt:\n                \
@@ -545,18 +541,17 @@ deploymentSpec:
           \ *\n\ndef merge_data_op(\n    rss_data: Annotated[Input[Dataset], \"rss_data\"\
           ],\n    scrape_data: Annotated[Input[Dataset], \"scrape_data\"],\n    api_data:\
           \ Annotated[Input[Dataset], \"api_data\"],\n    merged_data: Annotated[Output[Dataset],\
-          \ \"merged_data\"],\n    endpoint: str,\n    aws_access_key_id: str = 'minioadmin',\n\
-          \    aws_secret_access_key: str = 'minioadmin123'\n):\n    import pandas\
-          \ as pd\n    import boto3\n\n    df_rss    = pd.read_csv(rss_data.path)\n\
-          \    df_scrape = pd.read_csv(scrape_data.path)\n    df_api    = pd.read_csv(api_data.path)\n\
-          \n    df_all  = pd.concat([df_rss, df_scrape, df_api], ignore_index=True)\n\
-          \    df_uniq = df_all.drop_duplicates(subset=['link'])\n\n    df_uniq.to_csv(merged_data.path,\
-          \ index=False)\n\n    s3 = boto3.client(\n        's3',\n        endpoint_url=endpoint,\n\
-          \        aws_access_key_id=aws_access_key_id,\n        aws_secret_access_key=aws_secret_access_key\n\
-          \    )\n    with open(merged_data.path, 'rb') as f:\n        resp = s3.put_object(Bucket='mlops',\
-          \ Key='data/merged.csv', Body=f)\n    version_id = resp.get('VersionId')\n\
-          \    print(f\"Uploaded 'data/merged.csv' with version ID: {version_id}\"\
-          )\n\n"
+          \ \"merged_data\"],\n    endpoint: str,\n    aws_access_key_id: str,\n \
+          \   aws_secret_access_key: str\n):\n    import pandas as pd\n    import\
+          \ boto3\n\n    df_rss    = pd.read_csv(rss_data.path)\n    df_scrape = pd.read_csv(scrape_data.path)\n\
+          \    df_api    = pd.read_csv(api_data.path)\n\n    df_all  = pd.concat([df_rss,\
+          \ df_scrape, df_api], ignore_index=True)\n    df_uniq = df_all.drop_duplicates(subset=['link'])\n\
+          \n    df_uniq.to_csv(merged_data.path, index=False)\n\n    s3 = boto3.client(\n\
+          \        's3',\n        endpoint_url=endpoint,\n        aws_access_key_id=aws_access_key_id,\n\
+          \        aws_secret_access_key=aws_secret_access_key\n    )\n    with open(merged_data.path,\
+          \ 'rb') as f:\n        resp = s3.put_object(Bucket='mlops', Key='data/merged.csv',\
+          \ Body=f)\n    version_id = resp.get('VersionId')\n    print(f\"Uploaded\
+          \ 'data/merged.csv' with version ID: {version_id}\")\n\n"
         image: python:3.10-slim
     exec-preprocess-op:
       container:
@@ -588,17 +583,17 @@ deploymentSpec:
           \ *\n\ndef preprocess_op(\n    merged_data: Annotated[Input[Dataset], \"\
           merged_data\"],\n    endpoint: str,\n    api_key: str,\n    train_data:\
           \ Annotated[Output[Dataset], \"train_data\"],\n    val_data: Annotated[Output[Dataset],\
-          \ \"val_data\"],\n    aws_access_key_id: str = 'minioadmin',\n    aws_secret_access_key:\
-          \ str = 'minioadmin123',\n):\n    import os\n    import pandas as pd\n \
-          \   import asyncio\n    from concurrent.futures import ThreadPoolExecutor\n\
-          \    import google.generativeai as genai\n    from sklearn.model_selection\
-          \ import train_test_split\n    import boto3\n\n    os.environ['GOOGLE_API_KEY']\
-          \ = api_key\n    genai.configure(api_key=api_key)\n    model = genai.GenerativeModel('gemini-2.0-flash-lite')\n\
-          \n    df = pd.read_csv(merged_data.path)\n\n    def build_prompt(text: str)\
-          \ -> str:\n        return (\n            \"You are an expert at analyzing\
-          \ news articles. Read the following article and assign it to a general category.\
-          \ \"\n            \"Don't use very specific or niche labels. The category\
-          \ should reflect the broad subject matter, such as \"\n            \"'Politics',\
+          \ \"val_data\"],\n    aws_access_key_id: str,\n    aws_secret_access_key:\
+          \ str,\n):\n    import os\n    import pandas as pd\n    import asyncio\n\
+          \    from concurrent.futures import ThreadPoolExecutor\n    import google.generativeai\
+          \ as genai\n    from sklearn.model_selection import train_test_split\n \
+          \   import boto3\n\n    os.environ['GOOGLE_API_KEY'] = api_key\n    genai.configure(api_key=api_key)\n\
+          \    model = genai.GenerativeModel('gemini-2.0-flash-lite')\n\n    df =\
+          \ pd.read_csv(merged_data.path)\n\n    def build_prompt(text: str) -> str:\n\
+          \        return (\n            \"You are an expert at analyzing news articles.\
+          \ Read the following article and assign it to a general category. \"\n \
+          \           \"Don't use very specific or niche labels. The category should\
+          \ reflect the broad subject matter, such as \"\n            \"'Politics',\
           \ 'Technology', 'Gaming', 'Health', 'Sports', 'Finance', 'Crime', etc.\\\
           n\\n\"\n            \"Output ONLY the category name. Do NOT include explanations\
           \ or anything else.\\n\\n\"\n            f\"Article:\\n{text[:3000]}\\n\\\
@@ -689,20 +684,21 @@ deploymentSpec:
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
           \ *\n\ndef train_op(\n    train_data: Annotated[Input[Dataset], \"train_data\"\
           ],\n    val_data:   Annotated[Input[Dataset], \"val_data\"],\n    endpoint:\
-          \ str,\n    epochs:    int = 1\n):\n    import os\n    import pandas as\
-          \ pd\n    import torch\n    from torch.utils.data import DataLoader, TensorDataset\n\
-          \    from torch.optim import AdamW\n    from transformers import AutoTokenizer,\
-          \ AutoModelForSequenceClassification\n    import mlflow\n    import boto3\n\
-          \    import json\n    from sklearn.metrics import accuracy_score, f1_score\n\
-          \    from torch.serialization import add_safe_globals\n    from transformers.models.distilbert.modeling_distilbert\
-          \ import (\n    DistilBertModel,\n    DistilBertForSequenceClassification,\n\
-          \    )   \n\n    os.environ[\"MLFLOW_S3_ENDPOINT_URL\"]    = endpoint\n\
-          \    os.environ[\"AWS_ACCESS_KEY_ID\"]         = 'minioadmin'\n    os.environ[\"\
-          AWS_SECRET_ACCESS_KEY\"]     = 'minioadmin123'\n    mlflow.set_tracking_uri(\"\
-          http://mlflow.mlops.svc.cluster.local:5000\")\n    mlflow.set_experiment(\"\
-          news-classification\")\n\n    s3 = boto3.client(\n        's3',\n      \
-          \  endpoint_url=endpoint,\n        aws_access_key_id='minioadmin',\n   \
-          \     aws_secret_access_key='minioadmin123'\n    )\n    s3.upload_file(train_data.path,\
+          \ str,\n    aws_access_key_id: str,\n    aws_secret_access_key:str,\n  \
+          \  mlflow_s3_endpoint_url:str,\n    epochs:    int = 1\n):\n    import os\n\
+          \    import pandas as pd\n    import torch\n    from torch.utils.data import\
+          \ DataLoader, TensorDataset\n    from torch.optim import AdamW\n    from\
+          \ transformers import AutoTokenizer, AutoModelForSequenceClassification\n\
+          \    import mlflow\n    import boto3\n    import json\n    from sklearn.metrics\
+          \ import accuracy_score, f1_score\n    from torch.serialization import add_safe_globals\n\
+          \    from transformers.models.distilbert.modeling_distilbert import (\n\
+          \    DistilBertModel,\n    DistilBertForSequenceClassification,\n    ) \
+          \  \n\n    os.environ[\"MLFLOW_S3_ENDPOINT_URL\"]    = endpoint\n    os.environ[\"\
+          AWS_ACCESS_KEY_ID\"]         = aws_access_key_id\n    os.environ[\"AWS_SECRET_ACCESS_KEY\"\
+          ]     = aws_secret_access_key\n    mlflow.set_tracking_uri(\"http://mlflow.mlops.svc.cluster.local:5000\"\
+          )\n    mlflow.set_experiment(\"news-classification\")\n\n    s3 = boto3.client(\n\
+          \        's3',\n        endpoint_url=endpoint,\n        aws_access_key_id='minioadmin',\n\
+          \        aws_secret_access_key='minioadmin123'\n    )\n    s3.upload_file(train_data.path,\
           \ 'mlops', 'data/train.csv')\n    s3.upload_file(val_data.path,   'mlops',\
           \ 'data/val.csv')\n\n    train_df = pd.read_csv(train_data.path)\n    val_df\
           \   = pd.read_csv(val_data.path)\n\n    all_labels = pd.concat([train_df['category'],\
@@ -775,6 +771,8 @@ root:
         - download-model-op
         inputs:
           parameters:
+            pipelinechannel--bentoml_news_url:
+              componentInputParameter: bentoml_news_url
             pipelinechannel--download-model-op-Output:
               taskOutputParameter:
                 outputParameterKey: Output
@@ -793,9 +791,14 @@ root:
         - train-op
         inputs:
           parameters:
+            aws_access_key_id:
+              componentInputParameter: aws_access_key_id
+            aws_secret_access_key:
+              componentInputParameter: aws_secret_access_key
             endpoint:
-              runtimeValue:
-                constant: http://minio.mlops.svc.cluster.local:9000
+              componentInputParameter: endpoint
+            mlflow_s3_endpoint_url:
+              componentInputParameter: mlflow_s3_endpoint_url
         taskInfo:
           name: download-model-op
       fetch-api-op:
@@ -805,6 +808,10 @@ root:
           name: comp-fetch-api-op
         inputs:
           parameters:
+            aws_access_key_id:
+              componentInputParameter: aws_access_key_id
+            aws_secret_access_key:
+              componentInputParameter: aws_secret_access_key
             endpoint:
               componentInputParameter: endpoint
             gnews_api_key:
@@ -822,6 +829,10 @@ root:
           name: comp-fetch-rss-op
         inputs:
           parameters:
+            aws_access_key_id:
+              componentInputParameter: aws_access_key_id
+            aws_secret_access_key:
+              componentInputParameter: aws_secret_access_key
             endpoint:
               componentInputParameter: endpoint
         taskInfo:
@@ -833,6 +844,10 @@ root:
           name: comp-fetch-scrape-op
         inputs:
           parameters:
+            aws_access_key_id:
+              componentInputParameter: aws_access_key_id
+            aws_secret_access_key:
+              componentInputParameter: aws_secret_access_key
             endpoint:
               componentInputParameter: endpoint
             max_workers:
@@ -864,6 +879,10 @@ root:
                 outputArtifactKey: raw_data
                 producerTask: fetch-scrape-op
           parameters:
+            aws_access_key_id:
+              componentInputParameter: aws_access_key_id
+            aws_secret_access_key:
+              componentInputParameter: aws_secret_access_key
             endpoint:
               componentInputParameter: endpoint
         taskInfo:
@@ -884,6 +903,10 @@ root:
           parameters:
             api_key:
               componentInputParameter: gemini_api_key
+            aws_access_key_id:
+              componentInputParameter: aws_access_key_id
+            aws_secret_access_key:
+              componentInputParameter: aws_secret_access_key
             endpoint:
               componentInputParameter: endpoint
         taskInfo:
@@ -906,16 +929,27 @@ root:
                 outputArtifactKey: val_data
                 producerTask: preprocess-op
           parameters:
+            aws_access_key_id:
+              componentInputParameter: aws_access_key_id
+            aws_secret_access_key:
+              componentInputParameter: aws_secret_access_key
             endpoint:
-              runtimeValue:
-                constant: http://minio.mlops.svc.cluster.local:9000
+              componentInputParameter: endpoint
             epochs:
               runtimeValue:
-                constant: 11.0
+                constant: 40.0
+            mlflow_s3_endpoint_url:
+              componentInputParameter: mlflow_s3_endpoint_url
         taskInfo:
           name: train-op
   inputDefinitions:
     parameters:
+      aws_access_key_id:
+        parameterType: STRING
+      aws_secret_access_key:
+        parameterType: STRING
+      bentoml_news_url:
+        parameterType: STRING
       endpoint:
         parameterType: STRING
       gemini_api_key:
@@ -923,6 +957,8 @@ root:
       gnews_api_key:
         parameterType: STRING
       mediastack_access_key:
+        parameterType: STRING
+      mlflow_s3_endpoint_url:
         parameterType: STRING
       news_api_key:
         parameterType: STRING

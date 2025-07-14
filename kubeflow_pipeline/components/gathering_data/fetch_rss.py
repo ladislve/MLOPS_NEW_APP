@@ -15,8 +15,8 @@ from typing import Annotated
 def fetch_rss_op(
     raw_data: Annotated[Output[Dataset], "raw_data"],
     endpoint: str,
-    aws_access_key_id: str = 'minioadmin',
-    aws_secret_access_key: str = 'minioadmin123'
+    aws_access_key_id: str,
+    aws_secret_access_key: str
 ):
     import feedparser
     from newspaper import Article
@@ -47,7 +47,7 @@ def fetch_rss_op(
             print(f"Failed to parse: {url}")
             continue
 
-        for entry in feed.entries[:7]:
+        for entry in feed.entries[:70]:
             link  = entry.get('link', '').strip()
             title = entry.get('title', '').strip()
             try:
