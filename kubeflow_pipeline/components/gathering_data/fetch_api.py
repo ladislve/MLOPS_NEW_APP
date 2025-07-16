@@ -37,7 +37,7 @@ def fetch_api_op(
             return ""
 
     def fetch_gnews_articles():
-        url = f"https://gnews.io/api/v4/search?q=world&lang=en&max=50&token={gnews_api_key}"
+        url = f"https://gnews.io/api/v4/search?q=world&lang=en&max=5&token={gnews_api_key}"
         resp = requests.get(url)
         data = resp.json()
         arts = []
@@ -56,7 +56,7 @@ def fetch_api_op(
         return arts
 
     def fetch_mediastack_articles():
-        url = f"http://api.mediastack.com/v1/news?access_key={mediastack_access_key}&languages=en&limit=70"
+        url = f"http://api.mediastack.com/v1/news?access_key={mediastack_access_key}&languages=en&limit=7"
         resp = requests.get(url)
         data = resp.json()
         arts = []
@@ -79,7 +79,7 @@ def fetch_api_op(
         resp = requests.get(url)
         data = resp.json()
         arts = []
-        for item in data.get("items", [])[:70]:
+        for item in data.get("items", [])[:7]:
             title = item.get("title", "").strip()
             link = item.get("url", "").strip()
             text = scrape_article_text(link)

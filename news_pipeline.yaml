@@ -308,7 +308,7 @@ deploymentSpec:
           \        try:\n            art = Article(url)\n            art.download()\n\
           \            art.parse()\n            return art.text[:500]\n        except:\n\
           \            return \"\"\n\n    def fetch_gnews_articles():\n        url\
-          \ = f\"https://gnews.io/api/v4/search?q=world&lang=en&max=50&token={gnews_api_key}\"\
+          \ = f\"https://gnews.io/api/v4/search?q=world&lang=en&max=5&token={gnews_api_key}\"\
           \n        resp = requests.get(url)\n        data = resp.json()\n       \
           \ arts = []\n        for item in data.get(\"articles\", []):\n         \
           \   title = item.get(\"title\", \"\").strip()\n            link = item.get(\"\
@@ -317,7 +317,7 @@ deploymentSpec:
           \          \"source\": \"GNews\",\n                    \"title\": title,\n\
           \                    \"text\": text,\n                    \"link\": link\n\
           \                })\n            time.sleep(0.05)\n        return arts\n\
-          \n    def fetch_mediastack_articles():\n        url = f\"http://api.mediastack.com/v1/news?access_key={mediastack_access_key}&languages=en&limit=70\"\
+          \n    def fetch_mediastack_articles():\n        url = f\"http://api.mediastack.com/v1/news?access_key={mediastack_access_key}&languages=en&limit=7\"\
           \n        resp = requests.get(url)\n        data = resp.json()\n       \
           \ arts = []\n        for item in data.get(\"data\", []):\n            title\
           \ = item.get(\"title\", \"\").strip()\n            link = item.get(\"url\"\
@@ -328,8 +328,8 @@ deploymentSpec:
           \                })\n            time.sleep(0.05)\n        return arts\n\
           \n    def fetch_hn_rssapi():\n        url = \"https://hnrss.org/frontpage.jsonfeed\"\
           \n        resp = requests.get(url)\n        data = resp.json()\n       \
-          \ arts = []\n        for item in data.get(\"items\", [])[:70]:\n       \
-          \     title = item.get(\"title\", \"\").strip()\n            link = item.get(\"\
+          \ arts = []\n        for item in data.get(\"items\", [])[:7]:\n        \
+          \    title = item.get(\"title\", \"\").strip()\n            link = item.get(\"\
           url\", \"\").strip()\n            text = scrape_article_text(link)\n   \
           \         if title and text:\n                arts.append({\n          \
           \          \"source\": \"HackerNews\",\n                    \"title\": title,\n\
@@ -394,8 +394,8 @@ deploymentSpec:
           \        'https://medium.com/feed/hackernoon',\n        'https://www.reddit.com/r/programming/.rss'\n\
           \    ]\n\n    records = []\n\n    for url in rss_list:\n        feed = feedparser.parse(url)\n\
           \        if feed.bozo:\n            print(f\"Failed to parse: {url}\")\n\
-          \            continue\n\n        for entry in feed.entries[:70]:\n     \
-          \       link  = entry.get('link', '').strip()\n            title = entry.get('title',\
+          \            continue\n\n        for entry in feed.entries[:7]:\n      \
+          \      link  = entry.get('link', '').strip()\n            title = entry.get('title',\
           \ '').strip()\n            try:\n                article = Article(link)\n\
           \                article.download()\n                article.parse()\n \
           \               text_snippet = article.text[:200]\n                if title\
@@ -455,7 +455,7 @@ deploymentSpec:
           \ 'main p'\n            ]\n            for sel in selectors:\n         \
           \       elems = soup.select(sel)\n                if elems:\n          \
           \          txt = ' '.join(p.get_text().strip() for p in elems[:3])\n   \
-          \                 if len(txt) > 50:\n                        return txt[:200]\n\
+          \                 if len(txt) > 5:\n                        return txt[:200]\n\
           \            ps = soup.find_all('p')\n            if ps:\n             \
           \   txt = ' '.join(p.get_text().strip() for p in ps[:3])\n             \
           \   return txt[:200]\n            return soup.get_text()[:200]\n\n     \
@@ -937,7 +937,7 @@ root:
               componentInputParameter: endpoint
             epochs:
               runtimeValue:
-                constant: 40.0
+                constant: 12.0
             mlflow_s3_endpoint_url:
               componentInputParameter: mlflow_s3_endpoint_url
         taskInfo:

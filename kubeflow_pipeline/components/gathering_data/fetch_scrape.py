@@ -53,7 +53,7 @@ def fetch_scrape_op(
                 elems = soup.select(sel)
                 if elems:
                     txt = ' '.join(p.get_text().strip() for p in elems[:3])
-                    if len(txt) > 50:
+                    if len(txt) > 5:
                         return txt[:200]
             ps = soup.find_all('p')
             if ps:

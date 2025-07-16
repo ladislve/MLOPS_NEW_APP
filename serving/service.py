@@ -108,8 +108,8 @@ demo_image = bentoml.images.PythonImage(python_version="3.10") \
 )
 class NewsClassifier:
     def __init__(self):
-        self.categories = self.load_labels_from_minio()
-        self.model = self.load_latest_model()
+        # self.categories = self.load_labels_from_minio()
+        # self.model = self.load_latest_model()
         self.model_lock = threading.Lock()
 
     def load_labels_from_minio(self):

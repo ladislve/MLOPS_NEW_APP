@@ -63,7 +63,7 @@ def news_pipeline(
         aws_access_key_id=aws_access_key_id,
         aws_secret_access_key=aws_secret_access_key,
         mlflow_s3_endpoint_url=mlflow_s3_endpoint_url,
-        epochs=40
+        epochs=12
     )
 
     download_task = download_model_op(

@@ -47,7 +47,7 @@ def fetch_rss_op(
             print(f"Failed to parse: {url}")
             continue
 
-        for entry in feed.entries[:70]:
+        for entry in feed.entries[:7]:
             link  = entry.get('link', '').strip()
             title = entry.get('title', '').strip()
             try:

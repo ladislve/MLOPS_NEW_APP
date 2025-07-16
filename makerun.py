@@ -8,7 +8,7 @@ client = kfp.Client(host="http://localhost:3000")
 
 run = client.create_run_from_pipeline_package(
     pipeline_file="news_pipeline.yaml",
-    enable_caching=False,
+    enable_caching=True,
     arguments={
         'news_api_key': os.getenv('NEWS_API_KEY'),
         'endpoint': os.getenv('MINIO_ENDPOINT_KUBEFLOW'),
